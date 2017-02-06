@@ -9,23 +9,24 @@
 
 #include <opencv2/opencv.hpp>
 
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+
+void error(char *msg)
+{
+    perror(msg);
+    exit(0);
+}
+
 using namespace cv;
 using namespace std;
 
-#ifdef USE_NT_CORE
-#include "ntcore.h"
-#include "tables/ITableListener.h"
-#include "networktables/NetworkTable.h"
-#endif
 
 
 RNG rng(12345);
 
-#ifdef USE_NT_CORE
-std::shared_ptr<NetworkTable> table;
-#endif
-
-static bool NODASHBOARD = false;
 
 int m_H_MIN = 80;
 int m_S_MIN = 45;
@@ -50,28 +51,50 @@ extern "C" {
     filter_process function, and should be freed by the filter_free function
 */
 bool filter_init(const char * args, void** filter_ctx) {
-	// Do network tables things
 	// Set client
 	// Set IP address
 
-#ifdef USE_NT_CORE
-	NetworkTable::SetClientMode();
-	NetworkTable::SetTeam(111);
-	NetworkTable::SetIPAddress("10.1.11.2");
-	table = NetworkTable::GetTable("remoteIO");
+    int sockfd, portno, n;
 
-	if (!NODASHBOARD)
-	{
-		m_H_MIN = (int) table->GetNumber("Minimum Hue", m_H_MIN);
-		m_H_MAX = (int) table->GetNumber("Maximum Hue", m_H_MAX);
-		m_S_MIN = (int) table->GetNumber("Minimum Saturation", m_S_MIN);
-		m_S_MAX = (int) table->GetNumber("Maximum Saturation", m_S_MAX);
-		m_V_MIN = (int) table->GetNumber("Minimum Value", m_V_MIN);
-		m_V_MAX = (int) table->GetNumber("Maximum Value", m_V_MAX);
-	}
-#endif
+    struct sockaddr_in serv_addr;
+    struct hostent *server;
+
+    char buffer[256];
+
+    portno = 8080;
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0)
+        error("ERROR opening socket");
+    server = gethostbyname("10.1.11.6");
+    if (server == NULL) {
+        fprintf(stderr,"ERROR, no such host\n");
+        exit(0);
+    }
+    bzero((char *) &serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    bcopy((char *)server->h_addr,
+         (char *)&serv_addr.sin_addr.s_addr,
+         server->h_length);
+    serv_addr.sin_port = htons(portno);
+    if (connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr)) < 0)
+        error("ERROR connecting");
+
+    bzero(buffer,256);
+    n = recv(sockfd,buffer,255, 0);
+    if (n < 0)
+         error("ERROR reading from socket");
+    printf("%s\n",buffer);
 
 	return true;
+
+
+//    printf("Please enter the message: ");
+//    bzero(buffer,256);
+//    fgets(buffer,255,stdin);
+//    n = write(sockfd,buffer,strlen(buffer));
+//    if (n < 0)
+//         error("ERROR writing to socket");
+//
 }
 
 int m_goalX;
@@ -194,6 +217,8 @@ void ws_process(Mat &imgbgr) {
          cv::resize(imgbgr, tmp, Size(320, 240));
 
          imgbgr = tmp;
+
+
 #ifdef USE_NT_CORE
 	table->PutNumber("Target Bottom", targetBottom);
 	table->PutNumber("Target Center", targetCenter);
