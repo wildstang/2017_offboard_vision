@@ -28,13 +28,16 @@ static int BRIGHTNESS = 30;
 static int CONTRAST = 5;
 static int SATURATION = 200;
 
-int m_H_MIN = 80;
-int m_S_MIN = 45;
-int m_V_MIN = 0;
+int m_H_MIN = 0;
+int m_S_MIN = 0;
+int m_V_MIN = 245;
 
-int m_H_MAX = 120;
-int m_S_MAX = 255;
+int m_H_MAX = 0;
+int m_S_MAX = 0;
 int m_V_MAX = 255;
+
+int offset = 0;
+int thresholdX = 50;
 
 
 static int countP = 0;
@@ -81,6 +84,7 @@ bool filter_init(const char * args, void** filter_ctx) {
 bool wayToSort(int i, int j) { return i > j; }
 
 void ws_process(Mat& img) {
+	
 	Mat hsvMat(img.size(), img.type());
 	Mat hsvOut;
 	cvtColor(img, hsvMat, COLOR_BGR2HSV);
@@ -115,27 +119,44 @@ void ws_process(Mat& img) {
 			}
 		}
 	}
+	bool rects = false;
 	Rect oneRect;
 	Rect theOtherRect;
 	if(contours.size() > 0){
 		oneRect = boundingRect(contours.at(closest));
-		rectangle(img, Point(oneRect.x, oneRect.y),
-			Point(oneRect.x + oneRect.width,
-					oneRect.y + oneRect.height), Scalar(0, 255, 0),
-			2);
 	}
 	if(contours.size() > 1){
 		theOtherRect = boundingRect(contours.at(secClose));
-		rectangle(img, Point(theOtherRect.x, theOtherRect.y),
-			Point(theOtherRect.x + theOtherRect.width,
-					theOtherRect.y + theOtherRect.height), Scalar(0, 255, 0),
-			2);
+		rects = true;
 	}
-	if(oneRect.)
-	
-	//Mat tmp;
-	//cv::resize(img, tmp, Size(320, 240));
-	//img = tmp;
+	int leftBound = ((400 + offset) - thresholdX);
+	int rightBound = ((400 + offset) + thresholdX);
+	if((leftBound < 0) || (rightBound > 800)){
+		leftBound = 350;
+		rightBound = 450;
+	}
+	line(img, Point(leftBound, 0), Point(leftBound, 600), Scalar(0,0,0));
+	line(img, Point(rightBound, 0), Point(rightBound, 600), Scalar(0,0,0));
+	if(rects){
+		int avgX;
+		//int avgY;
+		if(oneRect.area() > 0 && theOtherRect.area() > 0){
+			avgX = ((oneRect.x + (oneRect.width/2)) + (theOtherRect.x + (theOtherRect.width/2)))/2;
+		//	avgY = (oneRect.height + theOtherRect.width)/2;
+		}
+		if(avgX > 0 && avgX < 800/*&& avgY >0*/){
+			if ((avgX >= leftBound) && (avgX <= rightBound)){
+				rectangle(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 255, 0), 2);
+				rectangle(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 255, 0), 2);
+			}else{
+				rectangle(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 0, 255), 2);
+				rectangle(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 0, 255), 2);
+			}
+		}
+	}
+	Mat tmp;
+	cv::resize(img, tmp, Size(320, 240));
+	img = tmp;
 }
 
 void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
