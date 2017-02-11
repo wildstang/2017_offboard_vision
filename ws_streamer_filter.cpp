@@ -62,27 +62,43 @@ bool filter_init(const char * args, void** filter_ctx) {
     char buffer[256];
 
     portno = 8080;
+    cout << "Opening socket" << endl;
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
+    {
+    	cout << "Could not open socket" << endl;
         error("ERROR opening socket");
+    }
+
+    cout << "Getting host name" << endl;
     server = gethostbyname("10.1.11.6");
     if (server == NULL) {
-        fprintf(stderr,"ERROR, no such host\n");
+        cout << "ERROR, no such host" << endl;
         exit(0);
     }
+
     bzero((char *) &serv_addr, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr,
-         (char *)&serv_addr.sin_addr.s_addr,
-         server->h_length);
+    bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
     serv_addr.sin_port = htons(portno);
+
+    cout << "Attempting to connect" << endl;
     if (connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr)) < 0)
-        error("ERROR connecting");
+    {
+    	cout << "Error connecting" << endl;
+    	error("ERROR connecting");
+    }
+
+    cout << "Connected" << endl;
 
     bzero(buffer,256);
     n = recv(sockfd,buffer,255, 0);
+    cout << "Received data" << endl;
     if (n < 0)
-         error("ERROR reading from socket");
+    {
+    	error("ERROR reading from socket");
+    }
+
     printf("%s\n",buffer);
 
 	return true;
