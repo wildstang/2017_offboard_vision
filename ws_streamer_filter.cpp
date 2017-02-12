@@ -6,7 +6,7 @@
 #include <iostream>
 #include <stdio.h>
 #include <time.h>
-
+#include <stdlib.h>
 #include <opencv2/opencv.hpp>
 
 #include <sys/types.h>
@@ -23,19 +23,20 @@ void error(char *msg)
 using namespace cv;
 using namespace std;
 
-
+#define WS_USE_SOCKETS
 
 RNG rng(12345);
 
 
-int m_H_MIN = 80;
-int m_S_MIN = 45;
+int m_H_MIN = 50;
+int m_S_MIN = 30;
 int m_V_MIN = 0;
 
 int m_H_MAX = 120;
 int m_S_MAX = 255;
 int m_V_MAX = 255;
 
+int sockfd;
 
 
 // exports for the filter
@@ -54,7 +55,8 @@ bool filter_init(const char * args, void** filter_ctx) {
 	// Set client
 	// Set IP address
 
-    int sockfd, portno, n;
+#ifdef WS_USE_SOCKETS
+    int portno, n;
 
     struct sockaddr_in serv_addr;
     struct hostent *server;
@@ -101,16 +103,52 @@ bool filter_init(const char * args, void** filter_ctx) {
 
     printf("%s\n",buffer);
 
+    // Parse config string
+    char *token;
+
+	/* get the first token */
+	token = strtok(buffer, "|\n");
+
+	int count = 0;
+	/* walk through other tokens */
+	while( token != NULL )
+	{
+		printf( " %s\n", token );
+		if (count == 0)
+		{
+			m_H_MIN = atoi(token);
+		}
+		if (count == 1)
+		{
+			m_S_MIN = atoi(token);
+		}
+		if (count == 2)
+		{
+			m_V_MIN = atoi(token);
+		}
+		if (count == 3)
+		{
+			m_H_MAX = atoi(token);
+		}
+		if (count == 4)
+		{
+			m_S_MAX = atoi(token);
+		}
+		if (count == 5)
+		{
+			m_V_MAX = atoi(token);
+		}
+
+		token = strtok(NULL, "|\n");
+		count++;
+	}
+
+
+	printf("Hmin = %d\nHmax = %d\nSmin = %d\nSmax = %d\nVmin = %d\nVmax = %d\n", m_H_MIN, m_H_MAX, m_S_MIN, m_S_MAX, m_V_MIN, m_V_MAX);
+#endif
 	return true;
 
 
-//    printf("Please enter the message: ");
-//    bzero(buffer,256);
-//    fgets(buffer,255,stdin);
-//    n = write(sockfd,buffer,strlen(buffer));
-//    if (n < 0)
-//         error("ERROR writing to socket");
-//
 }
 
 int m_goalX;
@@ -128,7 +166,9 @@ void ws_process(Mat &imgbgr) {
 	// Make an empty matrix with our image for hsv
 	Mat hsvMat = Mat::zeros(imgbgr.size(), imgbgr.type());//(imgbgr.size(), imgbgr.type());
 
+	cout << "Converting colour" << endl;
 	cvtColor(imgbgr, hsvMat, COLOR_BGR2HSV);
+	cout << "Converted colour" << endl;
 
 	double find_rectangles_time ;
 	double draw_largest_time ;
@@ -142,13 +182,17 @@ void ws_process(Mat &imgbgr) {
 	m_goalX = imgbgr.cols / 2;
 	m_goalY = imgbgr.rows / 2;
 
+	cout << "Calling inRange" << endl;
 	inRange(hsvMat, Scalar(m_H_MIN, m_S_MIN, m_V_MIN), Scalar(m_H_MAX, m_S_MAX, m_V_MAX), threshMat);
+	cout << "Returned inRange" << endl;
 
 	// Mat threshold_output;
 	vector < Vec4i > hierarchy;
 	vector < vector<Point> > contours;
 
+	cout << "Finding contours" << endl;
 	findContours(threshMat, contours, hierarchy, CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+	cout << "Found contours" << endl;
 
 	int targetBottom = 0;
 	int targetCenter = 0;
@@ -214,7 +258,9 @@ void ws_process(Mat &imgbgr) {
         }
 
 		// Just Draw Blue for now
+    	cout << "Drawing rectangle" << endl;
          rectangle(imgbgr, Point(target.x, target.y), Point(target.x + target.width, target.y + target.height), Scalar(0, 255, 0), 2);
+     	cout << "Drawn rectangle" << endl;
       }
 
 //		if (countP % (fps / 2) == 0)
@@ -230,10 +276,23 @@ void ws_process(Mat &imgbgr) {
          threshMat.release();
 
          Mat tmp;
+     	cout << "Resizing image" << endl;
          cv::resize(imgbgr, tmp, Size(320, 240));
+     	cout << "Resized image" << endl;
 
          imgbgr = tmp;
 
+#ifdef WS_USE_SOCKETS
+         int n;
+         char buffer[256];
+         bzero(buffer,256);
+         sprintf(buffer, "%d\n", m_currentX);
+         n = send(sockfd,buffer,strlen(buffer), MSG_DONTWAIT);
+         if (n < 0)
+         {
+        	 error("ERROR writing to socket");
+         }
+#endif
 
 #ifdef USE_NT_CORE
 	table->PutNumber("Target Bottom", targetBottom);
@@ -262,7 +321,7 @@ void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
 	endTime = clock();
 	double time_spent = (double) (endTime - startTime) / CLOCKS_PER_SEC;
 
-	fprintf(stdout, "%f\n", time_spent);
+	fprintf(stdout, "t=%f\n", time_spent);
 //    dst = src;
 }
 
