@@ -56,28 +56,103 @@ extern "C" {
     filter_process function, and should be freed by the filter_free function
 */
 bool filter_init(const char * args, void** filter_ctx) {
-	// Do network tables things
-	// Set client
-	// Set IP address
+	//Set client
+	//Set IP address
 
-#ifdef USE_NT_CORE
-	NetworkTable::SetClientMode();
-	NetworkTable::SetTeam(111);
-	NetworkTable::SetIPAddress("10.1.11.2");
-	table = NetworkTable::GetTable("remoteIO");
+#ifdef WS_USE_SOCKETS
+    int portno, n;
 
-	if (!NODASHBOARD)
+    struct sockaddr_in serv_addr;
+    struct hostent *server;
+
+    char buffer[256];
+
+    portno = 8080;
+    cout << "Opening socket" << endl;
+    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0)
+    {
+    	cout << "Could not open socket" << endl;
+        error("ERROR opening socket");
+    }
+
+    cout << "Getting host name" << endl;
+    server = gethostbyname("10.1.11.6");
+    if (server == NULL) {
+        cout << "ERROR, no such host" << endl;
+        exit(0);
+    }
+
+    bzero((char *) &serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
+    serv_addr.sin_port = htons(portno);
+
+    cout << "Attempting to connect" << endl;
+    if (connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr)) < 0)
+    {
+    	cout << "Error connecting" << endl;
+    	error("ERROR connecting");
+    }
+
+    cout << "Connected" << endl;
+
+    bzero(buffer,256);
+    n = recv(sockfd,buffer,255, 0);
+    cout << "Received data" << endl;
+    if (n < 0)
+    {
+    	error("ERROR reading from socket");
+    }
+
+    printf("%s\n",buffer);
+
+    // Parse config string
+    char *token;
+
+	/* get the first token */
+	token = strtok(buffer, "|\n");
+
+	int count = 0;
+	/* walk through other tokens */
+	while( token != NULL )
 	{
-		m_H_MIN = (int) table.getNumber("Minimum Hue", H_MIN);
-		m_H_MAX = (int) table.getNumber("Maximum Hue", H_MAX);
-		m_S_MIN = (int) table.getNumber("Minimum Saturation", S_MIN);
-		m_S_MAX = (int) table.getNumber("Maximum Saturation", S_MAX);
-		m_V_MIN = (int) table.getNumber("Minimum Value", V_MIN);
-		m_V_MAX = (int) table.getNumber("Maximum Value", V_MAX);
-	}
-#endif
+		printf( " %s\n", token );
+		if (count == 0)
+		{
+			m_H_MIN = atoi(token);
+		}
+		if (count == 1)
+		{
+			m_S_MIN = atoi(token);
+		}
+		if (count == 2)
+		{
+			m_V_MIN = atoi(token);
+		}
+		if (count == 3)
+		{
+			m_H_MAX = atoi(token);
+		}
+		if (count == 4)
+		{
+			m_S_MAX = atoi(token);
+		}
+		if (count == 5)
+		{
+			m_V_MAX = atoi(token);
+		}
 
+		token = strtok(NULL, "|\n");
+		count++;
+	}
+
+
+	printf("Hmin = %d\nHmax = %d\nSmin = %d\nSmax = %d\nVmin = %d\nVmax = %d\n", m_H_MIN, m_H_MAX, m_S_MIN, m_S_MAX, m_V_MIN, m_V_MAX);
+#endif
 	return true;
+
+
 }
 
 
