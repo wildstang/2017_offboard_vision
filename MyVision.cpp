@@ -6,27 +6,32 @@
 #include <iostream>
 #include <math.h>
 
+
+#include <time.h>
+#include <stdlib.h>
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+
 using namespace cv;
 using namespace std;
 
-#ifdef USE_NT_CORE
-#include "ntcore.h"
-#include "tables/ITableListener.h"
-#include "networktables/NetworkTable.h"
-#endif
+#define WS_USE_SOCKETS
 
-
-RNG rng(12345);
-
-#ifdef USE_NT_CORE
-std::shared_ptr<NetworkTable> table;
-#endif
 
 static bool NODASHBOARD = false;
 static int NUM_AVERAGES = 5;
 static int BRIGHTNESS = 30;
 static int CONTRAST = 5;
 static int SATURATION = 200;
+
+void error(char *msg)
+{
+    perror(msg);
+    exit(0);
+}
 
 int m_H_MIN = 0;
 int m_S_MIN = 0;
@@ -39,6 +44,7 @@ int m_V_MAX = 255;
 int offset = 0;
 int thresholdX = 50;
 
+int sockfd;
 
 static int countP = 0;
 static int cc = 0;
@@ -77,7 +83,7 @@ bool filter_init(const char * args, void** filter_ctx) {
     }
 
     cout << "Getting host name" << endl;
-    server = gethostbyname("10.1.11.6");
+    server = gethostbyname("10.1.11.46");
     if (server == NULL) {
         cout << "ERROR, no such host" << endl;
         exit(0);
