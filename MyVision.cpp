@@ -145,8 +145,15 @@ bool filter_init(const char * args, void** filter_ctx) {
 			m_S_MAX = atoi(token);
 		}
 		if (count == 5)
-		{
 			m_V_MAX = atoi(token);
+		}
+		if (count == 6)
+		{
+			offset = atoi(token);
+		}
+		if (count == 7)
+		{
+			thresholdX = atoi(token);
 		}
 
 		token = strtok(NULL, "|\n");
