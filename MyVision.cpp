@@ -72,7 +72,7 @@ bool filter_init(const char * args, void** filter_ctx) {
     struct hostent *server;
 
     char buffer[256];
-
+	
     portno = 8080;
     cout << "Opening socket" << endl;
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -219,6 +219,7 @@ void ws_process(Mat& img) {
 	}
 	int leftBound = ((400 + offset) - thresholdX);
 	int rightBound = ((400 + offset) + thresholdX);
+	int xCorrectionLevel;
 	if((leftBound < 0) || (rightBound > 800)){
 		leftBound = 350;
 		rightBound = 450;
@@ -227,12 +228,10 @@ void ws_process(Mat& img) {
 	line(img, Point(rightBound, 0), Point(rightBound, 600), Scalar(0,0,0));
 	if(rects){
 		int avgX;
-		//int avgY;
 		if(oneRect.area() > 0 && theOtherRect.area() > 0){
 			avgX = ((oneRect.x + (oneRect.width/2)) + (theOtherRect.x + (theOtherRect.width/2)))/2;
-		//	avgY = (oneRect.height + theOtherRect.width)/2;
 		}
-		if(avgX > 0 && avgX < 800/*&& avgY >0*/){
+		if(avgX > 0 && avgX < 800){
 			if ((avgX >= leftBound) && (avgX <= rightBound)){
 				rectangle(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 255, 0), 2);
 				rectangle(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 255, 0), 2);
@@ -241,6 +240,22 @@ void ws_process(Mat& img) {
 				rectangle(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 0, 255), 2);
 			}
 		}
+		if(avgX != null){
+			if((avgX >= leftBound) && (avgX <= rightBound)){
+				xCorrectionLevel = 0;
+			}else{
+				int leftSide = abs(avgX - leftSide);
+				int rightSide = abs(avgX - rightSide);
+				if(rightSide < leftSide){
+					xCorrectionLevel = avgX/(800 - rightBound);
+				}else{
+					xCorrectionLevel = avgX/(leftBound);
+				}
+			}
+		}
+	}
+	if(xCorrectionLevel != null){
+		send(sockfd, (const char*)xCorrectionLevel, 10, 0);
 	}
 	Mat tmp;
 	cv::resize(img, tmp, Size(320, 240));
