@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <semaphore.h>
 
 #include <sys/time.h>
 
@@ -37,7 +38,11 @@ static void timespecDisplay(timespec *time);
 static int SocketReadln(int Socket, char *DestBuf, int MaxNumChars);
 
 static timespec tsPrev;	// Previous Time
+static pthread_t tid;
 
+static void* SlaveProcessThread(void *arg);
+static sem_t sem_ImageProcessed;
+static sem_t sem_ImageAvailableToProcess;
 
 void error(const char *msg)
 {
@@ -194,6 +199,19 @@ bool filter_init(const char * args, void** filter_ctx) {
 	printf("Hmin = %d\nSmin = %d\nVmin = %d\nHmax = %d\nSmax = %d\nVmax = %d\nOffset = %d\nThreshold = %d\nBlur Radius = %f\n", m_H_MIN, m_S_MIN, m_V_MIN, m_H_MAX, m_S_MAX, m_V_MAX, offset, thresholdX, blurRadius);
 #endif
 
+	// Create the semaphores for signalling that to the slave thread that there is work to be done and
+	// for the slave thread to signal when it has completed processing the image.
+	sem_init(&sem_ImageProcessed, 0, 1); 			// set to initial value of 1 indicating that the "image" is ready
+	sem_init(&sem_ImageAvailableToProcess, 0, 0); 	// set to initial value of 0 indicating that the "image" is not available
+
+	// Spawn off the worker thread
+	int err;
+	err = pthread_create(&tid, NULL, &SlaveProcessThread, NULL);
+	if (err != 0)
+		printf("\ncan't create thread :[%s]", strerror(err));
+	else
+		printf("\n Thread created successfully\n");
+
 	clock_gettime(CLOCK_REALTIME, &tsPrev);
 
 	return true;
@@ -217,19 +235,20 @@ void ws_process(Mat& img) {
 
 
 	clock_gettime(CLOCK_REALTIME, &tsStart);
-	// 
-	//  Blur the image
-	// 
-	Mat	blurInput = img;
-	Mat blurOutput;
-	int radius 			= (int)(blurRadius + 0.5);
-	int kernelSize 		= 2*radius + 1;
-	blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
-	//GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
+	//// 
+	////  Blur the image
+	//// 
+	//Mat	blurInput = img;
+	//Mat blurOutput;
+	//int radius 			= (int)(blurRadius + 0.5);
+	//int kernelSize 		= 2*radius + 1;
+	//blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
+	////GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
 	// 
 	//  Convert img(BGR) -> hsvMat(HSV) color space
 	// 
-	Mat	cnvInput = blurOutput;
+	Mat	cnvInput = img;
+	//Mat	cnvInput = blurOutput;
 	Mat	cnvOutput;
 	cvtColor(cnvInput, cnvOutput, COLOR_BGR2HSV);
 	// 
@@ -471,10 +490,30 @@ Exit:
 }
 #endif //WS_USE_ORIGINAL_WS_PROCESS
 
+static Mat SlaveProcessImage;
+static int imgNum = 0;
+static bool FirstTime = true;
+
 void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
-	ws_process(src);
-	
-	dst = src;
+
+
+	sem_wait(&sem_ImageProcessed);
+
+	if (FirstTime == true) {
+		FirstTime = false;
+		dst = src;
+	}
+	else {
+		dst = SlaveProcessImage.clone();
+	}
+
+	SlaveProcessImage = src.clone();
+
+	sem_post(&sem_ImageAvailableToProcess);
+
+
+	//ws_process(src);
+	//dst = src;
 }
 
 
@@ -555,3 +594,21 @@ static int SocketReadln(int Socket, char *DestBuf, int MaxNumChars)
 
 	return (i);
 }
+
+static bool RunThread = true;
+
+static void* SlaveProcessThread(void *arg)
+{
+	printf("%s(): Started\n", __FUNCTION__);
+
+	while (RunThread == true ) {
+		sem_wait(&sem_ImageAvailableToProcess);
+
+		ws_process(SlaveProcessImage);
+
+		sem_post(&sem_ImageProcessed);
+	}
+
+	return NULL;
+}
+
