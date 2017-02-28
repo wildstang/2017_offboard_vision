@@ -55,6 +55,7 @@ int m_V_MAX = 255;
 
 int offset = 0;
 int thresholdX = 50;
+double blurRadius	= 5.0;
 
 int sockfd;
 
@@ -181,12 +182,16 @@ bool filter_init(const char * args, void** filter_ctx) {
 		{
 			thresholdX = atoi(token);
 		}
+		if (count == 8)
+		{
+			blurRadius = atof(token);
+		}
 
 		token = strtok(NULL, "|\n");
 		count++;
 	}
 
-	printf("Hmin = %d\nHmax = %d\nSmin = %d\nSmax = %d\nVmin = %d\nVmax = %d\n", m_H_MIN, m_H_MAX, m_S_MIN, m_S_MAX, m_V_MIN, m_V_MAX);
+	printf("Hmin = %d\nSmin = %d\nVmin = %d\nHmax = %d\nSmax = %d\nVmax = %d\nOffset = %d\nThreshold = %d\nBlur Radius = %f\n", m_H_MIN, m_S_MIN, m_V_MIN, m_H_MAX, m_S_MAX, m_V_MAX, offset, thresholdX, blurRadius);
 #endif
 
 	clock_gettime(CLOCK_REALTIME, &tsPrev);
@@ -212,25 +217,21 @@ void ws_process(Mat& img) {
 
 
 	clock_gettime(CLOCK_REALTIME, &tsStart);
-
 	// 
 	//  Blur the image
 	// 
 	Mat	blurInput = img;
 	Mat blurOutput;
-	double doubleRadius	= 5.0;
-	int radius 			= (int)(doubleRadius + 0.5);
+	int radius 			= (int)(blurRadius + 0.5);
 	int kernelSize 		= 2*radius + 1;
 	blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
 	//GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
-
 	// 
 	//  Convert img(BGR) -> hsvMat(HSV) color space
 	// 
 	Mat	cnvInput = blurOutput;
 	Mat	cnvOutput;
 	cvtColor(cnvInput, cnvOutput, COLOR_BGR2HSV);
-
 	// 
 	// Find the pixels that are within the the specified range and place into hsvOut
 	// 
@@ -239,7 +240,8 @@ void ws_process(Mat& img) {
 	//inRange(hsvMat, Scalar(0, 48, 0), Scalar(100, 180, 246), hsvOut);	// Poppe Basement
 	//inRange(hsvMat, Scalar(11, 0, 0), Scalar(87, 150, 255), hsvOut);	// Classroom
 	//inRange(hsvMat, Scalar(142, 0, 225), Scalar(180, 255, 255), hsvOut);	// Gym with Light TBD
-	inRange(inRangeInput, Scalar(81, 0, 238), Scalar(180, 255, 255), inRangeOutput);	// Poppe Basement with Light
+	//inRange(inRangeInput, Scalar(81, 0, 238), Scalar(180, 255, 255), inRangeOutput);	// Poppe Basement with Light
+	inRange (inRangeInput, Scalar(m_H_MIN, m_S_MIN, m_V_MIN), Scalar(m_H_MAX, m_S_MAX, m_V_MAX), inRangeOutput);
 
 	// 
 	// find the contours
@@ -260,15 +262,16 @@ void ws_process(Mat& img) {
 	// If there are not at least 2 contours found, just return since there is nothing to do.
 	//
 	if (contours.size() <= 1) {
+		cout<<"#5.1"<<endl;
 		// nothing to do so just return
 		goto Exit;
 	}
-
 
 	//
 	// Go through the contours looking calculating the aspect ratios which can be used to find the
 	// rectangles that we are looking for.
 	//
+	
 	for (int i = 0; i < contours.size(); i++) {
 		Rect currentSize = boundingRect(contours[i]);
 
@@ -305,7 +308,6 @@ void ws_process(Mat& img) {
 
 		//printf("i=%d similarity=%f Height=%d Width=%d\n" ,i, similarity[i], (int) MeasuredHeight, (int) MeasuredWidth);
 	}
-
 	// go through looking for the smallest which repesents the region of intrest that we are interested in
 	closest = 0;
 	for(int i = 0; i < contours.size(); i++){
@@ -319,9 +321,9 @@ void ws_process(Mat& img) {
 	if (closest == 0) {
 		secClose = 1;
 	}
-	else
+	else{
 		secClose = 0;
-
+	}
 	// OK, go about finding the second closest contour which represents the aspect ration that we are looking for
 	for(int i = 0; i < contours.size(); i++){
 		if (i != closest) {
@@ -416,6 +418,7 @@ void ws_process(Mat& img) {
 
 			Parm1++;
 			sprintf(output, "%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
+			//printf("%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
 			send(sockfd, output, strlen(output)+1, 0);
 		}
 		else {
