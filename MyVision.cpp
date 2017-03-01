@@ -225,11 +225,17 @@ void ws_process(Mat& img) {
 	
 	Mat hsvMat(img.size(), img.type());
 	Mat hsvOut;
+	
 	Rect oneRect;
 	Rect theOtherRect;
+	int middleOfOneRect;
+	int middleOfOtherRect;
+	int distanceBetweenRects;
+	
 	int leftBound;
 	int rightBound;
 	int xCorrectionLevel;
+	
 	timespec tsStart;
 	timespec tsEnd;
 
@@ -382,11 +388,15 @@ void ws_process(Mat& img) {
 		// 
 		// Calculate the center line between to 2 rectanges that were found.
 		//
-		int 	avgX;
-		int		iNumPixels 	= abs(theOtherRect.x-oneRect.x);
+		int avgX;
 
 		if(oneRect.area() > 0 && theOtherRect.area() > 0){
-			avgX = ((oneRect.x + (oneRect.width/2)) + (theOtherRect.x + (theOtherRect.width/2)))/2;
+			middleOfOneRect = oneRect.x + (oneRect.width / 2);
+			middleOfOtherRect = theOtherRect.x + (theOtherRect.width / 2);
+			
+			avgX = (middleOfOneRect + middleOfOtherRect)/2;
+			distanceBetweenRects = abs(middleOfOneRect - middleOfOtherRect);
+			int	iNumPixels 	= distanceBetweenRects;
 
 			// Put a line on the "calculated" center
 			for (int i = -1; i <= 1; i++) {
@@ -591,7 +601,6 @@ static int SocketReadln(int Socket, char *DestBuf, int MaxNumChars)
 			Done = true;
 		}
 	}
-
 	return (i);
 }
 
@@ -612,3 +621,14 @@ static void* SlaveProcessThread(void *arg)
 	return NULL;
 }
 
+static double Distance(int pixelWidth){
+	// uses inverse function to approximate distance
+	// has r = .9998
+	//////////
+	//							6373.965702
+	// distance = -.69078485 + -------------
+	//							pixelWidth
+	//////////
+	
+	return (-.69078485 + (6373.965702 / pixelWidth));
+}
