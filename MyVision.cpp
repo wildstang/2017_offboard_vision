@@ -444,9 +444,12 @@ void ws_process(Mat& img) {
 			static int	Parm1;
 			int	Parm2	= 2;
 			int	Parm3	= 3;			
+			double DistanceFromWall = 6338.802639/(double) iNumPixels;
+
 
 			Parm1++;
-			sprintf(output, "%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
+			sprintf(output, "%d,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
+			printf("%d,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
 			//printf("%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
 			send(sockfd, output, strlen(output)+1, 0);
 		}
