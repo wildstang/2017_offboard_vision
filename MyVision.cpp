@@ -33,9 +33,24 @@ static int SATURATION = 200;
 #define	STRIP_HEIGHT	5.0	// Strip Height in Inches
 #define	STRIP_WIDTH		2.5	// Strip Width in Inches
 
+//#define IMAGE_HEIGHT_P		600 
+//#define	IMAGE_WIDTH_P		800
+#define IMAGE_HEIGHT_P		480 
+#define	IMAGE_WIDTH_P		864
+#define	IMAGE_CENTERLINE_P	(IMAGE_WIDTH_P/2)
+
+// The calcluation for distance is as follows:
+//
+// distance = f(pixels) = DISTANCE_A + DISTANCE_B/pixels
+// 
+#define DISTANCE_A			-1.6454052
+#define DISTANCE_B			5124.81531
+
+
 static double TimeDiffInSec(timespec *start, timespec *stop);
 static void timespecDisplay(timespec *time);
 static int SocketReadln(int Socket, char *DestBuf, int MaxNumChars);
+static double Distance(int pixelWidth);
 
 static timespec tsPrev;	// Previous Time
 static pthread_t tid;
@@ -234,10 +249,13 @@ void ws_process(Mat& img) {
 	
 	int leftBound;
 	int rightBound;
-	int xCorrectionLevel;
+	int weightingBound;
+	double xCorrectionLevel;
 	
 	timespec tsStart;
 	timespec tsEnd;
+
+	printf("img.cols=%d img.rows=%d\n", img.cols, img.rows); 
 
 
 	clock_gettime(CLOCK_REALTIME, &tsStart);
@@ -287,7 +305,6 @@ void ws_process(Mat& img) {
 	// If there are not at least 2 contours found, just return since there is nothing to do.
 	//
 	if (contours.size() <= 1) {
-		cout<<"#5.1"<<endl;
 		// nothing to do so just return
 		goto Exit;
 	}
@@ -365,25 +382,23 @@ void ws_process(Mat& img) {
 		theOtherRect 	= boundingRect(contours.at(secClose));
 
 		// calculate and place some lines representing the "dead on" region
-		leftBound = ((400 + offset) - thresholdX);
-		rightBound = ((400 + offset) + thresholdX);
+		leftBound = ((IMAGE_CENTERLINE_P + offset) - thresholdX);
+		rightBound = ((IMAGE_CENTERLINE_P + offset) + thresholdX);
 
-		if((leftBound < 0) || (rightBound > 800)){
-			leftBound = 350;
-			rightBound = 450;
+		if((leftBound < 0) || (rightBound > IMAGE_WIDTH_P)){
+			leftBound  = IMAGE_CENTERLINE_P - thresholdX;
+			rightBound = IMAGE_CENTERLINE_P + thresholdX;
 		}
 
-		int unitSize = 1;
-
-		if(leftBound > 800 - rightBound){
-			unitSize = leftBound / 10;
+		if(leftBound > IMAGE_WIDTH_P - rightBound){
+			weightingBound = leftBound;
 		} else {
-			unitSize = (800 - rightBound) / 10;
+			weightingBound = rightBound;
 		}
 
-		// Display the "dead on" region as 2 vertical lines
-		line(img, Point(leftBound, 0), Point(leftBound, 600), Scalar(0,0,0));
-		line(img, Point(rightBound, 0), Point(rightBound, 600), Scalar(0,0,0));
+		line(img, Point(leftBound, 0), Point(leftBound, IMAGE_HEIGHT_P), Scalar(0,255,0), 3);
+		line(img, Point(rightBound, 0), Point(rightBound, IMAGE_HEIGHT_P), Scalar(0,255,0), 3);
+		
 
 		// 
 		// Calculate the center line between to 2 rectanges that were found.
@@ -399,10 +414,14 @@ void ws_process(Mat& img) {
 			int	iNumPixels 	= distanceBetweenRects;
 
 			// Put a line on the "calculated" center
-			for (int i = -1; i <= 1; i++) {
-				line(img, Point(avgX+i, 0), Point(avgX+i, 600), Scalar(255,0,0));
-			}
-
+			line(img, Point(avgX, 0), Point(avgX, IMAGE_HEIGHT_P), Scalar(0, 0, 0), 5);
+			
+			// Put lines on diagonals of rectangles	
+			line(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 0, 0), 2);
+			line(img, Point(oneRect.x + oneRect.width, oneRect.y), Point(oneRect.x, oneRect.y + oneRect.height), Scalar(0, 0, 0), 2);
+			line(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 0, 0), 2);
+			line(img, Point(theOtherRect.x + theOtherRect.width, theOtherRect.y), Point(theOtherRect.x, theOtherRect.y + theOtherRect.height), Scalar(0, 0, 0), 2);
+			
 			printf("avgX=%d oneRect.x=%d oneRect.width=%d theOtherRect.x=%d theOtherRect.width=%d iNumPixels=%d\n", 
 				   avgX, 
 				   oneRect.x,
@@ -412,7 +431,7 @@ void ws_process(Mat& img) {
 				   iNumPixels
 				   );
 
-			if(avgX > 0 && avgX < 800){     
+			if(avgX > 0 && avgX < IMAGE_WIDTH_P){     
 				if ((avgX >= leftBound) && (avgX <= rightBound)){
 					rectangle(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 255, 0), 2);
 					rectangle(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 255, 0), 2);
@@ -428,14 +447,18 @@ void ws_process(Mat& img) {
 			if((avgX >= leftBound) && (avgX <= rightBound)){
 				xCorrectionLevel = 0;
 			}else{
-				int leftSide = abs(avgX - leftSide);
-				int rightSide = abs(avgX - rightSide);
+				int leftSide = abs(avgX - leftBound);
+				int rightSide = abs(avgX - rightBound);
 				if(rightSide < leftSide){
-					xCorrectionLevel = (int) rightSide/unitSize;
+					xCorrectionLevel = ((double)rightSide/(double)weightingBound);
 				}else{
-					xCorrectionLevel = (int) (rightSide/unitSize) * -1;
+					xCorrectionLevel = (((double)leftSide/(double)weightingBound) * -1);
 				}
+				cout<<"leftside: "<<leftSide<<endl;
+				cout<<"rightside: "<<rightSide<<endl;
+				cout<<"correction #1"<<xCorrectionLevel<<endl;
 			}
+			
 
 			//
 			// Send back any values to the RoboRIO
@@ -443,13 +466,13 @@ void ws_process(Mat& img) {
 			char output[256];
 			static int	Parm1;
 			int	Parm2	= 2;
-			int	Parm3	= 3;			
-			double DistanceFromWall = 6338.802639/(double) iNumPixels;
-
+			int	Parm3	= 3;
+			double DistanceFromWall = Distance(iNumPixels);
 
 			Parm1++;
-			sprintf(output, "%d,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
-			printf("%d,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
+			sprintf(output, "%4.3f,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
+			printf("%4.3f,%5.3f,%d,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3, weightingBound);
+			cout<<"correction: "<<xCorrectionLevel<<endl;
 			//printf("%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
 			send(sockfd, output, strlen(output)+1, 0);
 		}
@@ -462,7 +485,13 @@ Exit:
 
 	// just resize the final image the will be sent back to the browser
 	Mat tmp;
-	cv::resize(img, tmp, Size(320, 240));
+	//cv::resize(img, tmp, Size(320, 240));
+	//cv::resize(img, tmp, Size(216, 120));
+	//cv::resize(img, tmp, Size(432, 240));
+	//cv::resize(img, tmp, Size(305, 170));
+	//cv::resize(img, tmp, Size(264, 147));
+	cv::resize(img, tmp, Size(299, 166));
+	//cvtColor(tmp, tmp, CV_BGR2GRAY, 1);
 	img = tmp;
 
 	clock_gettime(CLOCK_REALTIME, &tsEnd);
@@ -626,12 +655,15 @@ static void* SlaveProcessThread(void *arg)
 
 static double Distance(int pixelWidth){
 	// uses inverse function to approximate distance
-	// has r = .9998
+	// has really good correlation
+	// A and B change based on data collected
 	//////////
-	//							6373.965702
-	// distance = -.69078485 + -------------
-	//							pixelWidth
+	//						B
+	// distance = A + -------------
+	//					pixelWidth
+	//
+	// A and B defined above
 	//////////
 	
-	return (-.69078485 + (6373.965702 / pixelWidth));
+	return (DISTANCE_A + (DISTANCE_B / pixelWidth));
 }
