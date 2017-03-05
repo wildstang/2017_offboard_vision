@@ -1,3 +1,17 @@
+// This is the vision software that it use with the Raspberry Pi3 for
+// the 2017 FRC Steamworks Compitetion by:
+// 
+// TEAM:	111 Wildstang
+// 
+// This software s provides as-is and no guarantees are given that
+// it even works!
+// 
+// Use at you own risk!!!
+// 
+
+// *******************************************
+// Include files
+// *******************************************
 #include <cv.h>
 #include <cxcore.h>
 #include <highgui.h>
@@ -18,23 +32,20 @@
 
 #include <sys/time.h>
 
+// *******************************************
+// Namespaces... This is C++ after all...
+// *******************************************
 using namespace cv;
 using namespace std;
 
+// *******************************************
+// Defines & Constants
+// *******************************************
 #define WS_USE_SOCKETS
-#define WS_USE_ORIGINAL_WS_PROCESS	// Uncomment to use the "empty" version. Useful for meauring frame rate without processing
 
-static bool NODASHBOARD = false;
-static int NUM_AVERAGES = 5;
-static int BRIGHTNESS = 30;
-static int CONTRAST = 5;
-static int SATURATION = 200;
+#define	STRIP_HEIGHT		5.0	// Strip Height in Inches
+#define	STRIP_WIDTH			2.5	// Strip Width in Inches
 
-#define	STRIP_HEIGHT	5.0	// Strip Height in Inches
-#define	STRIP_WIDTH		2.5	// Strip Width in Inches
-
-//#define IMAGE_HEIGHT_P		600 
-//#define	IMAGE_WIDTH_P		800
 #define IMAGE_HEIGHT_P		480 
 #define	IMAGE_WIDTH_P		864
 #define	IMAGE_CENTERLINE_P	(IMAGE_WIDTH_P/2)
@@ -46,41 +57,59 @@ static int SATURATION = 200;
 #define DISTANCE_A			-1.6454052
 #define DISTANCE_B			5124.81531
 
+// *******************************************
+// Local Structures
+// *******************************************
 
+// *******************************************
+// Local Variables
+// *******************************************
+//static bool NODASHBOARD = false;
+//static int NUM_AVERAGES = 5;
+//static int BRIGHTNESS = 30;
+//static int CONTRAST = 5;
+//static int SATURATION = 200;
+
+static timespec tsPrev;	// Previous Time
+static pthread_t tid;	// Thread Id for the processing Image Processing Thread (ws_process())
+
+static int m_H_MIN 		= 0;
+static int m_S_MIN 		= 0;
+static int m_V_MIN 		= 245;
+  
+static int m_H_MAX 		= 0;
+static int m_S_MAX 		= 0;
+static int m_V_MAX 		= 255;
+
+static int offset 		= 0;
+static int thresholdX 	= 50;
+static double blurRadius= 5.0;
+
+static int sockfd;
+
+//static int countP = 0;
+//static int cc = 0;
+//static int imgNum = 0;
+
+static sem_t sem_ImageProcessed;
+static sem_t sem_ImageAvailableToProcess;
+
+static Mat SlaveProcessImage;
+static bool FirstTime = true;
+static bool RunThread = true;
+
+// *******************************************
+// Local Prototypes
+// *******************************************
+static void* SlaveProcessThread(void *arg);
+static void ws_process(Mat& img);
 static double TimeDiffInSec(timespec *start, timespec *stop);
 static void timespecDisplay(timespec *time);
 static int SocketReadln(int Socket, char *DestBuf, int MaxNumChars);
 static double Distance(int pixelWidth);
+static void error(const char *msg);
+static void ResizeImage(Mat &src, Mat &dst);
 
-static timespec tsPrev;	// Previous Time
-static pthread_t tid;
-
-static void* SlaveProcessThread(void *arg);
-static sem_t sem_ImageProcessed;
-static sem_t sem_ImageAvailableToProcess;
-
-void error(const char *msg)
-{
-    perror(msg);
-    exit(0);
-}
-
-int m_H_MIN = 0;
-int m_S_MIN = 0;
-int m_V_MIN = 245;
-
-int m_H_MAX = 0;
-int m_S_MAX = 0;
-int m_V_MAX = 255;
-
-int offset = 0;
-int thresholdX = 50;
-double blurRadius	= 5.0;
-
-int sockfd;
-
-static int countP = 0;
-static int cc = 0;
 
 // exports for the filter
 extern "C" {
@@ -90,11 +119,14 @@ extern "C" {
 }
 
 
+// *******************************************
+// Global Function Definitions
+// *******************************************
 /**
     Initializes the filter. If you return something, it will be passed to the
     filter_process function, and should be freed by the filter_free function
 */
-bool filter_init(const char * args, void** filter_ctx) {
+extern bool filter_init(const char * args, void** filter_ctx) {
 	//Set client
 	//Set IP address
 
@@ -233,10 +265,69 @@ bool filter_init(const char * args, void** filter_ctx) {
 }
 
 
-bool wayToSort(int i, int j) { return i > j; }
+extern void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
 
-#ifdef WS_USE_ORIGINAL_WS_PROCESS
-void ws_process(Mat& img) {
+
+	sem_wait(&sem_ImageProcessed);
+
+	if (FirstTime == true) {
+		//
+		// This first time through, there is no image to return so just resize the origianl image
+		// to the same size that the other images will be and send that back.
+		ResizeImage(src, dst);
+		dst = src;
+		FirstTime = false;
+	}
+	else {
+		dst = SlaveProcessImage.clone();
+	}
+
+	SlaveProcessImage = src.clone();
+
+	sem_post(&sem_ImageAvailableToProcess);
+}
+
+
+void filter_free(void* filter_ctx) {
+
+}
+
+// *******************************************
+// Local Function Definitions
+// *******************************************
+static void* SlaveProcessThread(void *arg)
+{
+	// This is the slave thread which is responsible for the following:
+	// 
+	// 1. Wait for an image
+	// 2. Process the image via ws_process
+	// 3. Resize the image
+	// 4. Let the main thread know that the image is ready to be sent out to the SmartDashboard
+	// 
+
+	printf("%s(): Started\n", __FUNCTION__);
+
+	while (RunThread == true ) {
+
+		// Wait for the main thread to tell this thread that an image is available to be processed
+		sem_wait(&sem_ImageAvailableToProcess);
+
+		// Process the image
+		ws_process(SlaveProcessImage);
+
+		ResizeImage(SlaveProcessImage, SlaveProcessImage);
+
+		// Let the main thread know that the image has been processed
+		sem_post(&sem_ImageProcessed);
+	}
+
+	return NULL;
+}
+
+static void ws_process(Mat& img) {
+	// The ws_process is responsible for processing the image and sending heading and distance information
+	// back to the RoboRIO. This is done as a separate thread in parallel to the main thread which is collecting the
+	// image frame from the camera and sending the output from to the RoboRIO.
 	
 	Mat hsvMat(img.size(), img.type());
 	Mat hsvOut;
@@ -255,8 +346,7 @@ void ws_process(Mat& img) {
 	timespec tsStart;
 	timespec tsEnd;
 
-	printf("img.cols=%d img.rows=%d\n", img.cols, img.rows); 
-
+	//printf("img.cols=%d img.rows=%d\n", img.cols, img.rows); 
 
 	clock_gettime(CLOCK_REALTIME, &tsStart);
 	//// 
@@ -268,6 +358,7 @@ void ws_process(Mat& img) {
 	//int kernelSize 		= 2*radius + 1;
 	//blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
 	////GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
+
 	// 
 	//  Convert img(BGR) -> hsvMat(HSV) color space
 	// 
@@ -292,11 +383,9 @@ void ws_process(Mat& img) {
 	Mat	findRangeInput = inRangeOutput;
 	vector < vector<Point> > contours;
 	vector < Vec4i > hierarchy;
-	findContours(findRangeInput, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE);		// No Blur
-	//findContours(blurMat, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE);	// Using Blurred Image
+	findContours(findRangeInput, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE);
 
 	vector <double> similarity(contours.size());
-
 
 	int closest = 0;
 	int secClose = 0;
@@ -454,9 +543,9 @@ void ws_process(Mat& img) {
 				}else{
 					xCorrectionLevel = (((double)leftSide/(double)weightingBound) * -1);
 				}
-				cout<<"leftside: "<<leftSide<<endl;
-				cout<<"rightside: "<<rightSide<<endl;
-				cout<<"correction #1"<<xCorrectionLevel<<endl;
+				//cout<<"leftside: "<<leftSide<<endl;
+				//cout<<"rightside: "<<rightSide<<endl;
+				//cout<<"correction: "<<xCorrectionLevel<<endl;
 			}
 			
 
@@ -464,15 +553,14 @@ void ws_process(Mat& img) {
 			// Send back any values to the RoboRIO
 			//
 			char output[256];
-			static int	Parm1;
 			int	Parm2	= 2;
 			int	Parm3	= 3;
 			double DistanceFromWall = Distance(iNumPixels);
 
-			Parm1++;
 			sprintf(output, "%4.3f,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
-			printf("%4.3f,%5.3f,%d,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3, weightingBound);
-			cout<<"correction: "<<xCorrectionLevel<<endl;
+			//printf("%4.3f,%5.3f,%d,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3, weightingBound);
+			printf("xCorrectionLevel=%4.3f, DistanceFromWall=%5.3f\n", xCorrectionLevel, DistanceFromWall);
+			//cout<<"correction: "<<xCorrectionLevel<<endl;
 			//printf("%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
 			send(sockfd, output, strlen(output)+1, 0);
 		}
@@ -482,18 +570,6 @@ void ws_process(Mat& img) {
 	}
 
 Exit:
-
-	// just resize the final image the will be sent back to the browser
-	Mat tmp;
-	//cv::resize(img, tmp, Size(320, 240));
-	//cv::resize(img, tmp, Size(216, 120));
-	//cv::resize(img, tmp, Size(432, 240));
-	//cv::resize(img, tmp, Size(305, 170));
-	//cv::resize(img, tmp, Size(264, 147));
-	cv::resize(img, tmp, Size(299, 166));
-	//cvtColor(tmp, tmp, CV_BGR2GRAY, 1);
-	img = tmp;
-
 	clock_gettime(CLOCK_REALTIME, &tsEnd);
 
 	double Frame2FrameTimeInSec = TimeDiffInSec(&tsPrev, &tsStart);
@@ -505,62 +581,28 @@ Exit:
 
 	tsPrev = tsStart;
 }
-#else //WS_USE_ORIGINAL_WS_PROCESS
-// Put together an empty process just for time measurement
-void ws_process(Mat& img) {
+
+static double Distance(int pixelWidth){
+	// uses inverse function to approximate distance
+	// has really good correlation
+	// A and B change based on data collected
+	//////////
+	//						B
+	// distance = A + -------------
+	//					pixelWidth
+	//
+	// A and B defined above
+	//////////
 	
-	timespec tsStart;
-	timespec tsEnd;
+	return (DISTANCE_A + (DISTANCE_B / pixelWidth));
+}
 
-	clock_gettime(CLOCK_REALTIME, &tsStart);
-
-Exit:
-
+static void ResizeImage(Mat &src, Mat &dst)
+{
 	Mat tmp;
-	cv::resize(img, tmp, Size(400, 300));
-	img = tmp;
-	clock_gettime(CLOCK_REALTIME, &tsEnd);
 
-	double Frame2FrameTimeInSec = TimeDiffInSec(&tsPrev, &tsStart);
-
-	printf("F2F=%5.4f S2E=%5.4f fps=%5.3f\n",
-		   Frame2FrameTimeInSec,
-		   TimeDiffInSec(&tsStart, &tsEnd),
-		   1./Frame2FrameTimeInSec);
-
-	tsPrev = tsStart;
-}
-#endif //WS_USE_ORIGINAL_WS_PROCESS
-
-static Mat SlaveProcessImage;
-static int imgNum = 0;
-static bool FirstTime = true;
-
-void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
-
-
-	sem_wait(&sem_ImageProcessed);
-
-	if (FirstTime == true) {
-		FirstTime = false;
-		dst = src;
-	}
-	else {
-		dst = SlaveProcessImage.clone();
-	}
-
-	SlaveProcessImage = src.clone();
-
-	sem_post(&sem_ImageAvailableToProcess);
-
-
-	//ws_process(src);
-	//dst = src;
-}
-
-
-void filter_free(void* filter_ctx) {
-
+	cv::resize(src, tmp, Size(299, 166));
+	dst = tmp;
 }
 
 static double TimeDiffInSec(timespec *start, timespec *stop)
@@ -577,10 +619,6 @@ static double TimeDiffInSec(timespec *start, timespec *stop)
 	//cout << "Stop:  ";
 	//timespecDisplay(stop);
 	//cout << endl;
-
-
-	//StartTimeInSec 	= start->tv_sec + start->tv_nsec/1000000000.;
-	//EndTimeInSec 	= stop->tv_sec + stop->tv_nsec/1000000000.;
 
 	if ((stop->tv_nsec - start->tv_nsec) < 0) {
 		test=0;
@@ -636,34 +674,13 @@ static int SocketReadln(int Socket, char *DestBuf, int MaxNumChars)
 	return (i);
 }
 
-static bool RunThread = true;
 
-static void* SlaveProcessThread(void *arg)
+static void error(const char *msg)
 {
-	printf("%s(): Started\n", __FUNCTION__);
-
-	while (RunThread == true ) {
-		sem_wait(&sem_ImageAvailableToProcess);
-
-		ws_process(SlaveProcessImage);
-
-		sem_post(&sem_ImageProcessed);
-	}
-
-	return NULL;
+    perror(msg);
+    exit(0);
 }
 
-static double Distance(int pixelWidth){
-	// uses inverse function to approximate distance
-	// has really good correlation
-	// A and B change based on data collected
-	//////////
-	//						B
-	// distance = A + -------------
-	//					pixelWidth
-	//
-	// A and B defined above
-	//////////
-	
-	return (DISTANCE_A + (DISTANCE_B / pixelWidth));
-}
+static bool wayToSort(int i, int j) { return i > j; }
+
+
