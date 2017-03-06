@@ -42,6 +42,7 @@ using namespace std;
 // Defines & Constants
 // *******************************************
 #define WS_USE_SOCKETS
+#define	ROBORIO_ID_ADDRESS	"10.1.11.46"
 
 #define	STRIP_HEIGHT		5.0	// Strip Height in Inches
 #define	STRIP_WIDTH			2.5	// Strip Width in Inches
@@ -138,7 +139,7 @@ extern bool filter_init(const char * args, void** filter_ctx) {
     }
 
     cout << "Getting host name" << endl;
-    server = gethostbyname("10.1.11.46");
+    server = gethostbyname(ROBORIO_ID_ADDRESS);
     if (server == NULL) {
         cout << "ERROR, no such host" << endl;
         exit(0);
