@@ -64,12 +64,6 @@ using namespace std;
 // *******************************************
 // Local Variables
 // *******************************************
-//static bool NODASHBOARD = false;
-//static int NUM_AVERAGES = 5;
-//static int BRIGHTNESS = 30;
-//static int CONTRAST = 5;
-//static int SATURATION = 200;
-
 static timespec tsPrev;	// Previous Time
 static pthread_t tid;	// Thread Id for the processing Image Processing Thread (ws_process())
 
@@ -87,21 +81,17 @@ static double blurRadius= 5.0;
 
 static int sockfd;
 
-//static int countP = 0;
-//static int cc = 0;
-//static int imgNum = 0;
-
 static sem_t sem_ImageProcessed;
 static sem_t sem_ImageAvailableToProcess;
 
-static Mat SlaveProcessImage;
+static Mat SlaveProcessImage;	// Passed between main thread and image processing thread.
 static bool FirstTime = true;
 static bool RunThread = true;
 
 // *******************************************
 // Local Prototypes
 // *******************************************
-static void* SlaveProcessThread(void *arg);
+static void* SlaveImgProcessThread(void *arg);
 static void ws_process(Mat& img);
 static double TimeDiffInSec(timespec *start, timespec *stop);
 static void timespecDisplay(timespec *time);
@@ -253,7 +243,7 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 
 	// Spawn off the worker thread
 	int err;
-	err = pthread_create(&tid, NULL, &SlaveProcessThread, NULL);
+	err = pthread_create(&tid, NULL, &SlaveImgProcessThread, NULL);
 	if (err != 0)
 		printf("\ncan't create thread :[%s]", strerror(err));
 	else
@@ -268,6 +258,7 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 extern void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
 
 
+	// Wait for the slave thread to indicate that it has completed processing the previous image
 	sem_wait(&sem_ImageProcessed);
 
 	if (FirstTime == true) {
@@ -279,11 +270,14 @@ extern void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
 		FirstTime = false;
 	}
 	else {
+		// OK, the slave thread has completed processing the image so copy to the destination
 		dst = SlaveProcessImage.clone();
 	}
 
+	// Copy the source image to the SlaveProcessImage so that the slave gets the updated image
 	SlaveProcessImage = src.clone();
 
+	// Tell the slave process that another image is available for it to process.
 	sem_post(&sem_ImageAvailableToProcess);
 }
 
@@ -295,12 +289,16 @@ void filter_free(void* filter_ctx) {
 // *******************************************
 // Local Function Definitions
 // *******************************************
-static void* SlaveProcessThread(void *arg)
+static void* SlaveImgProcessThread(void *arg)
 {
+	timespec 	tsStart;
+	timespec 	tsEnd;
+	double 		Frame2FrameTimeInSec = 0.0;
+
 	// This is the slave thread which is responsible for the following:
 	// 
 	// 1. Wait for an image
-	// 2. Process the image via ws_process
+	// 2. Process the image via ws_process()
 	// 3. Resize the image
 	// 4. Let the main thread know that the image is ready to be sent out to the SmartDashboard
 	// 
@@ -312,10 +310,23 @@ static void* SlaveProcessThread(void *arg)
 		// Wait for the main thread to tell this thread that an image is available to be processed
 		sem_wait(&sem_ImageAvailableToProcess);
 
+		clock_gettime(CLOCK_REALTIME, &tsStart);
+
 		// Process the image
 		ws_process(SlaveProcessImage);
 
+		// Resize since the image here so it is done by the slave process thread
 		ResizeImage(SlaveProcessImage, SlaveProcessImage);
+
+		clock_gettime(CLOCK_REALTIME, &tsEnd);
+
+		// Display the image processing time and frame rate
+		Frame2FrameTimeInSec = TimeDiffInSec(&tsPrev, &tsStart);
+		printf("F2F=%5.4f S2E=%5.4f fps=%5.3f\n\n",
+			   Frame2FrameTimeInSec,
+			   TimeDiffInSec(&tsStart, &tsEnd),
+			   1./Frame2FrameTimeInSec);
+		tsPrev = tsStart;
 
 		// Let the main thread know that the image has been processed
 		sem_post(&sem_ImageProcessed);
@@ -343,12 +354,8 @@ static void ws_process(Mat& img) {
 	int weightingBound;
 	double xCorrectionLevel;
 	
-	timespec tsStart;
-	timespec tsEnd;
-
 	//printf("img.cols=%d img.rows=%d\n", img.cols, img.rows); 
 
-	clock_gettime(CLOCK_REALTIME, &tsStart);
 	//// 
 	////  Blur the image
 	//// 
@@ -465,121 +472,125 @@ static void ws_process(Mat& img) {
 	}
 
 	//printf("closest=%d secClose=%d\n", closest, secClose);
-	{
-		// Get the rectangles that represent the regions of intrest
+
+	// Get the rectangles that represent the regions of intrest
+	oneRect 		= boundingRect(contours.at(closest));
+	theOtherRect 	= boundingRect(contours.at(secClose));
+
+	// Make sure the closest is on left and secClose is on the right
+	if (oneRect.x > theOtherRect.x) {
+		int TempValue;
+
+		TempValue = secClose;
+		secClose = closest;
+		closest = TempValue;
+
 		oneRect 		= boundingRect(contours.at(closest));
 		theOtherRect 	= boundingRect(contours.at(secClose));
+	}
 
-		// calculate and place some lines representing the "dead on" region
-		leftBound = ((IMAGE_CENTERLINE_P + offset) - thresholdX);
-		rightBound = ((IMAGE_CENTERLINE_P + offset) + thresholdX);
+	// calculate and place some lines representing the "dead on" region
+	leftBound = ((IMAGE_CENTERLINE_P + offset) - thresholdX);
+	rightBound = ((IMAGE_CENTERLINE_P + offset) + thresholdX);
 
-		if((leftBound < 0) || (rightBound > IMAGE_WIDTH_P)){
-			leftBound  = IMAGE_CENTERLINE_P - thresholdX;
-			rightBound = IMAGE_CENTERLINE_P + thresholdX;
+	if((leftBound < 0) || (rightBound > IMAGE_WIDTH_P)){
+		leftBound  = IMAGE_CENTERLINE_P - thresholdX;
+		rightBound = IMAGE_CENTERLINE_P + thresholdX;
+	}
+
+	if(leftBound > IMAGE_WIDTH_P - rightBound){
+		weightingBound = leftBound;
+	} else {
+		weightingBound = rightBound;
+	}
+
+	// Draw the left and right bounds indicating the "dead-on" zone
+	line(img, Point(leftBound, 0), Point(leftBound, IMAGE_HEIGHT_P), Scalar(0,255,0), 2);
+	line(img, Point(rightBound, 0), Point(rightBound, IMAGE_HEIGHT_P), Scalar(0,255,0), 2);
+	
+
+	// 
+	// Calculate the center line between to 2 rectanges that were found.
+	//
+	int avgX;
+
+	if(oneRect.area() > 0 && theOtherRect.area() > 0){
+		middleOfOneRect = oneRect.x + (oneRect.width / 2);
+		middleOfOtherRect = theOtherRect.x + (theOtherRect.width / 2);
+		
+		avgX = (middleOfOneRect + middleOfOtherRect)/2;
+		distanceBetweenRects = abs(middleOfOneRect - middleOfOtherRect);
+		int	iNumPixels 	= distanceBetweenRects;
+
+		// Put a line on the "calculated" center
+		line(img, Point(avgX, 0), Point(avgX, IMAGE_HEIGHT_P), Scalar(0, 0, 0), 3);
+		
+		// Put lines on diagonals of rectangles	
+		line(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 0, 0), 2);
+		line(img, Point(oneRect.x + oneRect.width, oneRect.y), Point(oneRect.x, oneRect.y + oneRect.height), Scalar(0, 0, 0), 2);
+		line(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 0, 0), 2);
+		line(img, Point(theOtherRect.x + theOtherRect.width, theOtherRect.y), Point(theOtherRect.x, theOtherRect.y + theOtherRect.height), Scalar(0, 0, 0), 2);
+		
+		printf("avgX=%d oneRect.x=%d oneRect.width=%d theOtherRect.x=%d theOtherRect.width=%d iNumPixels=%d\n", 
+			   avgX, 
+			   oneRect.x,
+			   oneRect.width,
+			   theOtherRect.x,
+			   theOtherRect.width,
+			   iNumPixels
+			   );
+
+		if(avgX > 0 && avgX < IMAGE_WIDTH_P){     
+			if ((avgX >= leftBound) && (avgX <= rightBound)){
+				rectangle(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 255, 0), 2);
+				rectangle(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 255, 0), 2);
+			}else{
+				rectangle(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 0, 255), 2);
+				rectangle(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 0, 255), 2);
+			}
 		}
 
-		if(leftBound > IMAGE_WIDTH_P - rightBound){
-			weightingBound = leftBound;
-		} else {
-			weightingBound = rightBound;
+		//
+		// Calculate the "correction value that is to be sent back to the RoboRIO
+		//
+		if((avgX >= leftBound) && (avgX <= rightBound)){
+			xCorrectionLevel = 0;
+		}else{
+			int leftSide = abs(avgX - leftBound);
+			int rightSide = abs(avgX - rightBound);
+			if(rightSide < leftSide){
+				xCorrectionLevel = ((double)rightSide/(double)weightingBound);
+			}else{
+				xCorrectionLevel = (((double)leftSide/(double)weightingBound) * -1);
+			}
+			printf("leftSide=%4d rightSide=%4d weightingBound=%4d xCorrectionLevel=%4.3f\n", leftSide, rightSide, weightingBound, xCorrectionLevel);
+			//cout<<"leftside: "<<leftSide<<endl;
+			//cout<<"rightside: "<<rightSide<<endl;
+			//cout<<"correction: "<<xCorrectionLevel<<endl;
 		}
-
-		line(img, Point(leftBound, 0), Point(leftBound, IMAGE_HEIGHT_P), Scalar(0,255,0), 3);
-		line(img, Point(rightBound, 0), Point(rightBound, IMAGE_HEIGHT_P), Scalar(0,255,0), 3);
 		
 
-		// 
-		// Calculate the center line between to 2 rectanges that were found.
 		//
-		int avgX;
+		// Send back any values to the RoboRIO
+		//
+		char output[256];
+		int	Parm2	= 2;
+		int	Parm3	= 3;
+		double DistanceFromWall = Distance(iNumPixels);
 
-		if(oneRect.area() > 0 && theOtherRect.area() > 0){
-			middleOfOneRect = oneRect.x + (oneRect.width / 2);
-			middleOfOtherRect = theOtherRect.x + (theOtherRect.width / 2);
-			
-			avgX = (middleOfOneRect + middleOfOtherRect)/2;
-			distanceBetweenRects = abs(middleOfOneRect - middleOfOtherRect);
-			int	iNumPixels 	= distanceBetweenRects;
-
-			// Put a line on the "calculated" center
-			line(img, Point(avgX, 0), Point(avgX, IMAGE_HEIGHT_P), Scalar(0, 0, 0), 5);
-			
-			// Put lines on diagonals of rectangles	
-			line(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 0, 0), 2);
-			line(img, Point(oneRect.x + oneRect.width, oneRect.y), Point(oneRect.x, oneRect.y + oneRect.height), Scalar(0, 0, 0), 2);
-			line(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 0, 0), 2);
-			line(img, Point(theOtherRect.x + theOtherRect.width, theOtherRect.y), Point(theOtherRect.x, theOtherRect.y + theOtherRect.height), Scalar(0, 0, 0), 2);
-			
-			printf("avgX=%d oneRect.x=%d oneRect.width=%d theOtherRect.x=%d theOtherRect.width=%d iNumPixels=%d\n", 
-				   avgX, 
-				   oneRect.x,
-				   oneRect.width,
-				   theOtherRect.x,
-				   theOtherRect.width,
-				   iNumPixels
-				   );
-
-			if(avgX > 0 && avgX < IMAGE_WIDTH_P){     
-				if ((avgX >= leftBound) && (avgX <= rightBound)){
-					rectangle(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 255, 0), 2);
-					rectangle(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 255, 0), 2);
-				}else{
-					rectangle(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 0, 255), 2);
-					rectangle(img, Point(theOtherRect.x, theOtherRect.y), Point(theOtherRect.x + theOtherRect.width, theOtherRect.y + theOtherRect.height), Scalar(0, 0, 255), 2);
-				}
-			}
-
-			//
-			// Calculate the "correction value that is to be sent back to the RoboRIO
-			//
-			if((avgX >= leftBound) && (avgX <= rightBound)){
-				xCorrectionLevel = 0;
-			}else{
-				int leftSide = abs(avgX - leftBound);
-				int rightSide = abs(avgX - rightBound);
-				if(rightSide < leftSide){
-					xCorrectionLevel = ((double)rightSide/(double)weightingBound);
-				}else{
-					xCorrectionLevel = (((double)leftSide/(double)weightingBound) * -1);
-				}
-				//cout<<"leftside: "<<leftSide<<endl;
-				//cout<<"rightside: "<<rightSide<<endl;
-				//cout<<"correction: "<<xCorrectionLevel<<endl;
-			}
-			
-
-			//
-			// Send back any values to the RoboRIO
-			//
-			char output[256];
-			int	Parm2	= 2;
-			int	Parm3	= 3;
-			double DistanceFromWall = Distance(iNumPixels);
-
-			sprintf(output, "%4.3f,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
-			//printf("%4.3f,%5.3f,%d,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3, weightingBound);
-			printf("xCorrectionLevel=%4.3f, DistanceFromWall=%5.3f\n", xCorrectionLevel, DistanceFromWall);
-			//cout<<"correction: "<<xCorrectionLevel<<endl;
-			//printf("%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
-			send(sockfd, output, strlen(output)+1, 0);
-		}
-		else {
-			printf("Why did we get here? oneRect.area()=%d theOtherRect.area()=%d\n", oneRect.area(), theOtherRect.area());
-		}
+		sprintf(output, "%4.3f,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
+		//printf("%4.3f,%5.3f,%d,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3, weightingBound);
+		printf("xCorrectionLevel=%4.3f, DistanceFromWall=%5.3f\n", xCorrectionLevel, DistanceFromWall);
+		//cout<<"correction: "<<xCorrectionLevel<<endl;
+		//printf("%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
+		send(sockfd, output, strlen(output)+1, 0);
+	}
+	else {
+		printf("Why did we get here? oneRect.area()=%d theOtherRect.area()=%d\n", oneRect.area(), theOtherRect.area());
 	}
 
 Exit:
-	clock_gettime(CLOCK_REALTIME, &tsEnd);
-
-	double Frame2FrameTimeInSec = TimeDiffInSec(&tsPrev, &tsStart);
-
-	printf("F2F=%5.4f S2E=%5.4f fps=%5.3f\n\n",
-		   Frame2FrameTimeInSec,
-		   TimeDiffInSec(&tsStart, &tsEnd),
-		   1./Frame2FrameTimeInSec);
-
-	tsPrev = tsStart;
+	return;
 }
 
 static double Distance(int pixelWidth){
