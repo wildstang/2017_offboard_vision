@@ -100,6 +100,7 @@ static int SocketReadln(int Socket, char *DestBuf, int MaxNumChars);
 static double Distance(int pixelWidth);
 static void error(const char *msg);
 static void ResizeImage(Mat &src, Mat &dst);
+static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int &secClose);
 
 
 // exports for the filter
@@ -360,18 +361,18 @@ static void ws_process(Mat& img) {
 	//// 
 	////  Blur the image
 	//// 
-	//Mat	blurInput = img;
-	//Mat blurOutput;
-	//int radius 			= (int)(blurRadius + 0.5);
-	//int kernelSize 		= 2*radius + 1;
-	//blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
-	////GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
+	Mat	blurInput = img;
+	Mat blurOutput;
+	int radius 			= (int)(blurRadius + 0.5);
+	int kernelSize 		= 2*radius + 1;
+	blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
+	//GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
 
 	// 
 	//  Convert img(BGR) -> hsvMat(HSV) color space
 	// 
-	Mat	cnvInput = img;
-	//Mat	cnvInput = blurOutput;
+	//Mat	cnvInput = img;
+	Mat	cnvInput = blurOutput;
 	Mat	cnvOutput;
 	cvtColor(cnvInput, cnvOutput, COLOR_BGR2HSV);
 	// 
@@ -392,84 +393,14 @@ static void ws_process(Mat& img) {
 	vector < vector<Point> > contours;
 	vector < Vec4i > hierarchy;
 	findContours(findRangeInput, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE);
-
-	vector <double> similarity(contours.size());
-
+	//for(int i = 0; i < contours.size())
 	int closest = 0;
 	int secClose = 0;
-
-	//
-	// If there are not at least 2 contours found, just return since there is nothing to do.
-	//
-	if (contours.size() <= 1) {
-		// nothing to do so just return
+	bool shouldContinue = ContourLocator(contours, closest, secClose);
+	cout<<"closest: "<<closest<<endl;
+	cout<<"secClose: "<<secClose<<endl;
+	if(!shouldContinue){
 		goto Exit;
-	}
-
-	//
-	// Go through the contours looking calculating the aspect ratios which can be used to find the
-	// rectangles that we are looking for.
-	//
-	
-	for (int i = 0; i < contours.size(); i++) {
-		Rect currentSize = boundingRect(contours[i]);
-
-		double MeasuredHeight 	= currentSize.height;
-		double MeasuredWidth 	= currentSize.width;
-
-		if (((MeasuredHeight < 20) || (MeasuredWidth < 10)) || 
-			 (MeasuredHeight > 500) || (MeasuredWidth > 700)) {
-			similarity[i] = 10.;
-		}
-		else
-		{
-			// *************************************************************************************************
-			// The similarity is calculated as follows:
-			// 
-			// 			 Measured Height   STRIP_WIDTH
-			// fabs(1 -  --------------- x -----------  )
-			//			 Measured Width	   STRIP_HEIGTH
-			// 
-			// This calculation should produce a range:
-			// 			0 <= similarity <= 1.0
-			// 
-			// Essentially, this is trying to find the object with the closest aspect ration to the one we are trying to find.
-			//
-			// The closer this is to 0 the better the chance that we found the object that we are looking for!!!
-			// *************************************************************************************************
-			similarity[i] = fabs(1.0-((MeasuredHeight / MeasuredWidth)* STRIP_WIDTH/STRIP_HEIGHT));
-		}
-        
-		//if (similarity[i] < 10.) {
-		// 	// Display the "Potentially good" rectangles
-		//	rectangle(img, Point(currentSize.x, currentSize.y), Point(currentSize.x + currentSize.width, currentSize.y + currentSize.height), Scalar(0, 255, 0), 2);
-		//}
-
-		//printf("i=%d similarity=%f Height=%d Width=%d\n" ,i, similarity[i], (int) MeasuredHeight, (int) MeasuredWidth);
-	}
-	// go through looking for the smallest which repesents the region of intrest that we are interested in
-	closest = 0;
-	for(int i = 0; i < contours.size(); i++){
-		if(similarity[i] < similarity[closest]){
-			closest = i;
-		}
-	}
-
-	// Make sure to start the second closest someplace other than the lowest 
-	// otherwise second closest might equal closest which we don't want!
-	if (closest == 0) {
-		secClose = 1;
-	}
-	else{
-		secClose = 0;
-	}
-	// OK, go about finding the second closest contour which represents the aspect ration that we are looking for
-	for(int i = 0; i < contours.size(); i++){
-		if (i != closest) {
-			if(similarity[i] < similarity[secClose]){
-				secClose = i;
-			}
-		}
 	}
 
 	//printf("closest=%d secClose=%d\n", closest, secClose);
@@ -592,6 +523,95 @@ static void ws_process(Mat& img) {
 
 Exit:
 	return;
+}
+
+static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int &secClose){
+	
+	vector <double> similarity(contours.size());
+
+	//
+	// If there are not at least 2 contours found, just return since there is nothing to do.
+	//
+	if (contours.size() <= 1) {
+		// nothing to do so just return
+		return false;
+	}
+
+	//
+	// Go through the contours looking calculating the aspect ratios which can be used to find the
+	// rectangles that we are looking for.
+	//
+	
+	for (int i = 0; i < contours.size(); i++) {
+		Rect currentSize = boundingRect(contours[i]);
+
+		double MeasuredHeight 	= currentSize.height;
+		double MeasuredWidth 	= currentSize.width;
+
+		if (((MeasuredHeight < 20) || (MeasuredWidth < 10)) || 
+			 (MeasuredHeight > 500) || (MeasuredWidth > 700)) {
+			similarity[i] = 10.;
+		}
+		else
+		{
+			// *************************************************************************************************
+			// The similarity is calculated as follows:
+			// 
+			// 			 Measured Height   STRIP_WIDTH
+			// fabs(1 -  --------------- x -----------  )
+			//			 Measured Width	   STRIP_HEIGTH
+			// 
+			// This calculation should produce a range:
+			// 			0 <= similarity <= 1.0
+			// 
+			// Essentially, this is trying to find the object with the closest aspect ration to the one we are trying to find.
+			//
+			// The closer this is to 0 the better the chance that we found the object that we are looking for!!!
+			// *************************************************************************************************
+			similarity[i] = fabs(1.0-((MeasuredHeight / MeasuredWidth)* STRIP_WIDTH/STRIP_HEIGHT));
+		}
+        
+		//if (similarity[i] < 10.) {
+		// 	// Display the "Potentially good" rectangles
+		//	rectangle(img, Point(currentSize.x, currentSize.y), Point(currentSize.x + currentSize.width, currentSize.y + currentSize.height), Scalar(0, 255, 0), 2);
+		//}
+
+		//printf("i=%d similarity=%f Height=%d Width=%d\n" ,i, similarity[i], (int) MeasuredHeight, (int) MeasuredWidth);
+	}
+	/*int i = 0;
+	while(i < contours.size()){
+		if(similarity[i] >= 9.9){
+			contours.erase (contours.begin() + i);
+			similarity.erase (similarity.begin() + i);
+		} else {
+			i++;
+		}
+	}*/
+	
+	// go through looking for the smallest which repesents the region of intrest that we are interested in
+	for(int i = 0; i < contours.size(); i++){
+		if(similarity[i] < similarity[closest]){
+			closest = i;
+		}
+	}
+
+	// Make sure to start the second closest someplace other than the lowest 
+	// otherwise second closest might equal closest which we don't want!
+	if (closest == 0) {
+		secClose = 1;
+	}
+	else{
+		secClose = 0;
+	}
+	// OK, go about finding the second closest contour which represents the aspect ration that we are looking for
+	for(int i = 0; i < contours.size(); i++){
+		if (i != closest) {
+			if(similarity[i] < similarity[secClose]){
+				secClose = i;
+			}
+		}
+	}
+	return true;
 }
 
 static double Distance(int pixelWidth){
