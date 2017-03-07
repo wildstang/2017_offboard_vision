@@ -41,7 +41,7 @@ using namespace std;
 // *******************************************
 // Defines & Constants
 // *******************************************
-//#define TRACE				// adds additional printf debug information
+#define TRACE				// adds additional printf debug information
 #define WS_USE_SOCKETS
 #define	ROBORIO_ID_ADDRESS	"10.1.11.46"
 
@@ -572,7 +572,12 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			// The closer this is to 0 the better the chance that we found the object that we are looking for!!!
 			// *************************************************************************************************
 			similarity[i] = fabs(1.0-((MeasuredHeight / MeasuredWidth)* STRIP_WIDTH/STRIP_HEIGHT));
-			UsableContour[i] = true;
+			if (similarity[i] > fabs(1.0- STRIP_WIDTH/STRIP_HEIGHT)) {
+				UsableContour[i] = false;
+			}
+			else {
+				UsableContour[i] = true;
+			}
 		}
         
 		//if (similarity[i] < 10.) {
@@ -661,7 +666,7 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			// This test looks for the 2 rectangles that are the most similar in terms of size.
 			testMinDiff = abs(testRect_i.y - testRect_j.y) +
 				          abs(testRect_i.height - testRect_j.height) +
-				          abs(testRect_i.x - testRect_j.x) +
+				          //abs(testRect_i.x - testRect_j.x) +
 				          abs(testRect_i.width - testRect_j.width);
 			if (testMinDiff < MinDiff) {
 				closest = i;
