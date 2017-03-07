@@ -3,7 +3,7 @@
 // 
 // TEAM:	111 Wildstang
 // 
-// This software s provides as-is and no guarantees are given that
+// This software is provided as-is and no guarantees are given that
 // it even works!
 // 
 // Use at you own risk!!!
@@ -41,6 +41,7 @@ using namespace std;
 // *******************************************
 // Defines & Constants
 // *******************************************
+//#define TRACE				// adds additional printf debug information
 #define WS_USE_SOCKETS
 #define	ROBORIO_ID_ADDRESS	"10.1.11.46"
 
@@ -358,9 +359,9 @@ static void ws_process(Mat& img) {
 	
 	//printf("img.cols=%d img.rows=%d\n", img.cols, img.rows); 
 
-	//// 
-	////  Blur the image
-	//// 
+	// 
+	//  Blur the image
+	// 
 	Mat	blurInput = img;
 	Mat blurOutput;
 	int radius 			= (int)(blurRadius + 0.5);
@@ -528,6 +529,7 @@ Exit:
 static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int &secClose){
 	
 	vector <double> similarity(contours.size());
+	vector <bool> UsableContour(contours.size());
 
 	//
 	// If there are not at least 2 contours found, just return since there is nothing to do.
@@ -551,6 +553,7 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 		if (((MeasuredHeight < 20) || (MeasuredWidth < 10)) || 
 			 (MeasuredHeight > 500) || (MeasuredWidth > 700)) {
 			similarity[i] = 10.;
+			UsableContour[i] = false;
 		}
 		else
 		{
@@ -569,6 +572,7 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			// The closer this is to 0 the better the chance that we found the object that we are looking for!!!
 			// *************************************************************************************************
 			similarity[i] = fabs(1.0-((MeasuredHeight / MeasuredWidth)* STRIP_WIDTH/STRIP_HEIGHT));
+			UsableContour[i] = true;
 		}
         
 		//if (similarity[i] < 10.) {
@@ -587,30 +591,96 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			i++;
 		}
 	}*/
-	
-	// go through looking for the smallest which repesents the region of intrest that we are interested in
-	for(int i = 0; i < contours.size(); i++){
-		if(similarity[i] < similarity[closest]){
-			closest = i;
-		}
-	}
 
-	// Make sure to start the second closest someplace other than the lowest 
-	// otherwise second closest might equal closest which we don't want!
-	if (closest == 0) {
-		secClose = 1;
+#ifdef TRACE
+	for(int i = 0; i < contours.size() ; i++){
+		Rect testRect;
+		testRect 	= boundingRect(contours.at(i));
+		printf("osimilarity[i=%2d]=%6.3f x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
+			   i, similarity[i], testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
 	}
-	else{
-		secClose = 0;
-	}
-	// OK, go about finding the second closest contour which represents the aspect ration that we are looking for
-	for(int i = 0; i < contours.size(); i++){
-		if (i != closest) {
-			if(similarity[i] < similarity[secClose]){
-				secClose = i;
+	printf("\n");
+#endif //TRACE
+
+	// Now lets sort them from best similarity (lowest number) to worst similarity (highest number)
+	double 			tmpSimilarity;
+	vector<Point>	tmpContour;
+	bool			tmpUsableContour;
+
+	for(int i = 0; i < contours.size() ; i++){
+		for(int j = 0; j < contours.size()-i-1; j++){
+			if (similarity[j] > similarity[j+1]) {
+
+				tmpSimilarity 	= similarity[j];
+				similarity[j] 	= similarity[j+1];
+				similarity[j+1] = tmpSimilarity;
+
+				tmpContour  	= contours[j];
+				contours[j] 	= contours[j+1];
+				contours[j+1] 	= tmpContour;
+
+				tmpUsableContour 	= UsableContour[j];
+				UsableContour[j] 	= UsableContour[j+1];
+				UsableContour[j+1] 	= tmpUsableContour;
 			}
 		}
 	}
+
+	int	MinDiff = 100000000;
+	int	testMinDiff;
+
+	for(int i = 0; i < contours.size() ; i++){
+
+		if (UsableContour[i] == false) {
+			continue;
+		}
+
+		Rect testRect_i;
+		testRect_i 	= boundingRect(contours.at(i));
+
+		for(int j = 0; j < contours.size(); j++){
+			if ((UsableContour[j] == false) || 
+				(i == j)) {
+				continue;
+			}
+
+			Rect testRect_j;
+			testRect_j 	= boundingRect(contours.at(j));
+
+			// this is a test to see if we are EXSTREAMLY CLOSE...
+			// If we are, both areas are > 400000 so call it good and get exit the loops.
+			if ((testRect_i.area() > 40000) && 
+				(testRect_j.area() > 40000)) {
+				closest = i;
+				secClose = j;
+				i = contours.size();
+				j = contours.size();
+				continue;
+			}
+
+			// This test looks for the 2 rectangles that are the most similar in terms of size.
+			testMinDiff = abs(testRect_i.y - testRect_j.y) +
+				          abs(testRect_i.height - testRect_j.height) +
+				          abs(testRect_i.x - testRect_j.x) +
+				          abs(testRect_i.width - testRect_j.width);
+			if (testMinDiff < MinDiff) {
+				closest = i;
+				secClose = j;
+				MinDiff = testMinDiff;
+			}
+		}
+	}
+#ifdef TRACE
+	for(int i = 0; i < contours.size() ; i++){
+		Rect testRect;
+		testRect 	= boundingRect(contours.at(i));
+		printf("similarity[i=%2d]=%6.3f x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
+			   i, similarity[i], testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
+	}
+
+	printf("closest=%d secClose=%d\n", closest, secClose);
+#endif //TRACE
+
 	return true;
 }
 
