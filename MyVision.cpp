@@ -630,7 +630,16 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			}
 		}
 	}
-
+	int count = 0;
+	for(int i = 0; i < UsableContour.size(); i++){
+		if(UsableContour[i]){
+			count++;
+		}
+	}
+	if(count < 3){
+		return false;
+	}
+	
 	int	MinDiff = 100000000;
 	int	testMinDiff;
 
