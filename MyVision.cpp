@@ -1,5 +1,5 @@
-// This is the vision software that it use with the Raspberry Pi3 for
-// the 2017 FRC Steamworks Compitetion by:
+// This is the vision software that it use with the Raspberry Pi 3 for
+// the 2017 FRC Steamworks Competition by:
 // 
 // TEAM:	111 Wildstang
 // 
@@ -86,7 +86,7 @@ static int sockfd;
 static sem_t sem_ImageProcessed;
 static sem_t sem_ImageAvailableToProcess;
 
-static Mat SlaveProcessImage;	// Passed between main thread and image processing thread.
+static Mat SlaveProcessImage;	// Image passed between main thread and image processing thread.
 static bool FirstTime = true;
 static bool RunThread = true;
 
@@ -241,8 +241,8 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 
 	// Create the semaphores for signalling that to the slave thread that there is work to be done and
 	// for the slave thread to signal when it has completed processing the image.
-	sem_init(&sem_ImageProcessed, 0, 1); 			// set to initial value of 1 indicating that the "image" is ready
-	sem_init(&sem_ImageAvailableToProcess, 0, 0); 	// set to initial value of 0 indicating that the "image" is not available
+	sem_init(&sem_ImageProcessed, 0, 1); 			// set to initial value of 1 indicating that the "image" is ready to the main thread.
+	sem_init(&sem_ImageAvailableToProcess, 0, 0); 	// set to initial value of 0 indicating that the "image" is not available to the slave thread
 
 	// Spawn off the worker thread
 	int err;
@@ -266,7 +266,7 @@ extern void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
 
 	if (FirstTime == true) {
 		//
-		// This first time through, there is no image to return so just resize the origianl image
+		// This first time through, there is no image to return so just resize the original image
 		// to the same size that the other images will be and send that back.
 		ResizeImage(src, dst);
 		dst = src;
@@ -362,18 +362,17 @@ static void ws_process(Mat& img) {
 	// 
 	//  Blur the image
 	// 
-	Mat	blurInput = img;
-	Mat blurOutput;
-	int radius 			= (int)(blurRadius + 0.5);
-	int kernelSize 		= 2*radius + 1;
-	blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
-	//GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
+	//Mat	blurInput = img;
+	//Mat blurOutput;
+	//int radius 			= (int)(blurRadius + 0.5);
+	//int kernelSize 		= 2*radius + 1;
+	//blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
+	////GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
 
 	// 
 	//  Convert img(BGR) -> hsvMat(HSV) color space
 	// 
-	//Mat	cnvInput = img;
-	Mat	cnvInput = blurOutput;
+	Mat	cnvInput = img;
 	Mat	cnvOutput;
 	cvtColor(cnvInput, cnvOutput, COLOR_BGR2HSV);
 	// 
@@ -567,7 +566,7 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			// This calculation should produce a range:
 			// 			0 <= similarity <= 1.0
 			// 
-			// Essentially, this is trying to find the object with the closest aspect ration to the one we are trying to find.
+			// Essentially, this is trying to find the object with the closest aspect ratio to the one we are trying to find.
 			//
 			// The closer this is to 0 the better the chance that we found the object that we are looking for!!!
 			// *************************************************************************************************
@@ -600,9 +599,16 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 #ifdef TRACE
 	for(int i = 0; i < contours.size() ; i++){
 		Rect testRect;
+		int	usable=-1;
+
+		if (UsableContour[i])
+			usable = 1;
+		else
+			usable = 0;
+
 		testRect 	= boundingRect(contours.at(i));
-		printf("osimilarity[i=%2d]=%6.3f x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
-			   i, similarity[i], testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
+		printf("BS similarity[i=%2d]=%6.3f Usable=%d x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
+			   i, similarity[i], usable, testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
 	}
 	printf("\n");
 #endif //TRACE
@@ -630,21 +636,39 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			}
 		}
 	}
+
+#ifdef TRACE
+	//for(int i = 0; i < contours.size() ; i++){
+	//	Rect testRect;
+	//	int	usable=-1;
+	//	if (UsableContour[i]) {
+	//		usable = 1;
+	//	}
+	//	else
+	//		usable = 0;
+    //
+	//	testRect 	= boundingRect(contours.at(i));
+	//	printf("AS similarity[i=%2d]=%6.3f Usable=%d x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
+	//		   i, similarity[i], usable, testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
+	//}
+	//printf("\n");
+#endif //TRACE
+
 	int count = 0;
 	for(int i = 0; i < UsableContour.size(); i++){
 		if(UsableContour[i]){
 			count++;
 		}
 	}
-	if(count < 3){
+
+	if(count < 2){
 		return false;
 	}
-	
+
 	int	MinDiff = 100000000;
 	int	testMinDiff;
 
 	for(int i = 0; i < contours.size() ; i++){
-
 		if (UsableContour[i] == false) {
 			continue;
 		}
@@ -661,14 +685,15 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			Rect testRect_j;
 			testRect_j 	= boundingRect(contours.at(j));
 
-			// this is a test to see if we are EXSTREAMLY CLOSE...
-			// If we are, both areas are > 400000 so call it good and get exit the loops.
+			// This is a test to see if we are EXTREAMLY CLOSE...
+			// If we are, both areas are > 400000 so call it good and exit the loops.
 			if ((testRect_i.area() > 40000) && 
 				(testRect_j.area() > 40000)) {
 				closest = i;
 				secClose = j;
 				i = contours.size();
 				j = contours.size();
+				printf("EXTREME CLOSEUP!!!\n");
 				continue;
 			}
 
@@ -684,6 +709,7 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			}
 		}
 	}
+
 #ifdef TRACE
 	for(int i = 0; i < contours.size() ; i++){
 		Rect testRect;
@@ -691,8 +717,6 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 		printf("similarity[i=%2d]=%6.3f x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
 			   i, similarity[i], testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
 	}
-
-	printf("closest=%d secClose=%d\n", closest, secClose);
 #endif //TRACE
 
 	return true;
