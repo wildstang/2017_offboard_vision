@@ -43,8 +43,8 @@ using namespace std;
 // *******************************************
 //#define TRACE				// adds additional printf debug information
 #define WS_USE_SOCKETS
-//#define	ROBORIO_IP_ADDRESS	"10.1.11.38"	// VisionTest on PC
-//#define	ROBORIO_IP_ADDRESS	"10.1.11.46"	// VisionTest on PC
+//#define	ROBORIO_IP_ADDRESS	"10.1.11.38"	// VisionTest on PC via WiFi
+//#define	ROBORIO_IP_ADDRESS	"10.1.11.46"		// VisionTest on PC via direct connect
 #define	ROBORIO_IP_ADDRESS	"10.1.11.2"		// Actual RoboRIO
 #define	ROBORIO_PORT_ADDRESS	5800			// Port Number on PC/RoboRIO
 
@@ -159,7 +159,7 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 	// P.Poppe 2/18/2017
 	//	Wait for the connection...
 	int	Count = 0;
-    cout << "Attempting to connect: " << ROBORIO_IP_ADDRESS << endl;
+    cout << "Attempting to connect: " << ROBORIO_IP_ADDRESS << " Port: " << ROBORIO_PORT_ADDRESS << endl;
 	cout << "." << std::flush;
 	Count++;
 	while (connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr)) < 0) {
@@ -255,7 +255,21 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 	else
 		printf("\n Thread created successfully\n");
 
+	{
+		char	SystemCmd[128];
+		int		exposure_absolute = 100;
+
+		// Turn off auto focus and set the exposure value on the camera
+		//system("v4l2-ctl -d /dev/video0 -c focus_auto=1");
+
+		// Turn off auto exposure and set the exposure value on the camera
+		system("v4l2-ctl -d /dev/video0 -c exposure_auto=1");
+		sprintf(SystemCmd, "v4l2-ctl -d /dev/video0 -c exposure_absolute=%d", exposure_absolute);
+		system(SystemCmd);
+	}
+
 	clock_gettime(CLOCK_REALTIME, &tsPrev);
+
 
 	return true;
 }
