@@ -41,9 +41,12 @@ using namespace std;
 // *******************************************
 // Defines & Constants
 // *******************************************
-#define TRACE				// adds additional printf debug information
+//#define TRACE				// adds additional printf debug information
 #define WS_USE_SOCKETS
-#define	ROBORIO_ID_ADDRESS	"10.1.11.46"
+//#define	ROBORIO_IP_ADDRESS	"10.1.11.38"	// VisionTest on PC
+//#define	ROBORIO_IP_ADDRESS	"10.1.11.46"	// VisionTest on PC
+#define	ROBORIO_IP_ADDRESS	"10.1.11.2"		// Actual RoboRIO
+#define	ROBORIO_PORT_ADDRESS	5800			// Port Number on PC/RoboRIO
 
 #define	STRIP_HEIGHT		5.0	// Strip Height in Inches
 #define	STRIP_WIDTH			2.5	// Strip Width in Inches
@@ -131,7 +134,7 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 
     char buffer[256];
 	
-    portno = 8080;
+    portno = ROBORIO_PORT_ADDRESS;
     cout << "Opening socket" << endl;
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0)
@@ -141,7 +144,7 @@ extern bool filter_init(const char * args, void** filter_ctx) {
     }
 
     cout << "Getting host name" << endl;
-    server = gethostbyname(ROBORIO_ID_ADDRESS);
+    server = gethostbyname(ROBORIO_IP_ADDRESS);
     if (server == NULL) {
         cout << "ERROR, no such host" << endl;
         exit(0);
@@ -156,7 +159,7 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 	// P.Poppe 2/18/2017
 	//	Wait for the connection...
 	int	Count = 0;
-    cout << "Attempting to connect: " << endl;
+    cout << "Attempting to connect: " << ROBORIO_IP_ADDRESS << endl;
 	cout << "." << std::flush;
 	Count++;
 	while (connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr)) < 0) {
@@ -373,6 +376,7 @@ static void ws_process(Mat& img) {
 	//  Convert img(BGR) -> hsvMat(HSV) color space
 	// 
 	Mat	cnvInput = img;
+	//Mat	cnvInput = blurOutput;
 	Mat	cnvOutput;
 	cvtColor(cnvInput, cnvOutput, COLOR_BGR2HSV);
 	// 
@@ -515,7 +519,9 @@ static void ws_process(Mat& img) {
 		printf("xCorrectionLevel=%4.3f, DistanceFromWall=%5.3f\n", xCorrectionLevel, DistanceFromWall);
 		//cout<<"correction: "<<xCorrectionLevel<<endl;
 		//printf("%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
+#ifdef WS_USE_SOCKETS
 		send(sockfd, output, strlen(output)+1, 0);
+#endif	//WS_USE_SOCKETS
 	}
 	else {
 		printf("Why did we get here? oneRect.area()=%d theOtherRect.area()=%d\n", oneRect.area(), theOtherRect.area());
@@ -607,8 +613,10 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			usable = 0;
 
 		testRect 	= boundingRect(contours.at(i));
-		printf("BS similarity[i=%2d]=%6.3f Usable=%d x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
-			   i, similarity[i], usable, testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
+		if (UsableContour[i] == true) {
+			printf("BS similarity[i=%2d]=%6.3f Usable=%d x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
+				   i, similarity[i], usable, testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
+		}
 	}
 	printf("\n");
 #endif //TRACE
@@ -714,8 +722,10 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 	for(int i = 0; i < contours.size() ; i++){
 		Rect testRect;
 		testRect 	= boundingRect(contours.at(i));
-		printf("similarity[i=%2d]=%6.3f x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
-			   i, similarity[i], testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
+		if (UsableContour[i] == true) {
+			printf("similarity[i=%2d]=%6.3f x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
+				   i, similarity[i], testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
+		}
 	}
 #endif //TRACE
 
