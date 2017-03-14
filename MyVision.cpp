@@ -255,18 +255,18 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 	else
 		printf("\n Thread created successfully\n");
 
-	{
-		char	SystemCmd[128];
-		int		exposure_absolute = 100;
-
-		// Turn off auto focus and set the exposure value on the camera
-		//system("v4l2-ctl -d /dev/video0 -c focus_auto=1");
-
-		// Turn off auto exposure and set the exposure value on the camera
-		system("v4l2-ctl -d /dev/video0 -c exposure_auto=1");
-		sprintf(SystemCmd, "v4l2-ctl -d /dev/video0 -c exposure_absolute=%d", exposure_absolute);
-		system(SystemCmd);
-	}
+	//{
+	//	char	SystemCmd[128];
+	//	int		exposure_absolute = 100;
+    //
+	//	// Turn off auto focus and set the exposure value on the camera
+	//	//system("v4l2-ctl -d /dev/video0 -c focus_auto=1");
+    //
+	//	// Turn off auto exposure and set the exposure value on the camera
+	//	system("v4l2-ctl -d /dev/video0 -c exposure_auto=1");
+	//	sprintf(SystemCmd, "v4l2-ctl -d /dev/video0 -c exposure_absolute=%d", exposure_absolute);
+	//	system(SystemCmd);
+	//}
 
 	clock_gettime(CLOCK_REALTIME, &tsPrev);
 
@@ -381,9 +381,7 @@ static void ws_process(Mat& img) {
 	//  Blur the image
 	// 
 
-	blurRadius = 7.0;
-
-
+	//blurRadius = 7.0;
 	Mat	blurInput = img;
 	Mat blurOutput;
 	int radius 			= (int)(blurRadius + 0.5);
@@ -547,6 +545,7 @@ Exit:
 		//cout<<"correction: "<<xCorrectionLevel<<endl;
 		//printf("%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
 #ifdef WS_USE_SOCKETS
+		printf("%s", output);
 		send(sockfd, output, strlen(output)+1, 0);
 #endif	//WS_USE_SOCKETS
 	}
