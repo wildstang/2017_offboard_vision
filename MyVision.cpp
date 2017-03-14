@@ -41,7 +41,7 @@ using namespace std;
 // *******************************************
 // Defines & Constants
 // *******************************************
-//#define TRACE				// adds additional printf debug information
+#define TRACE				// adds additional printf debug information
 #define WS_USE_SOCKETS
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.38"	// VisionTest on PC via WiFi
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.46"		// VisionTest on PC via direct connect
@@ -372,25 +372,30 @@ static void ws_process(Mat& img) {
 	int leftBound;
 	int rightBound;
 	int weightingBound;
-	double xCorrectionLevel;
+	double xCorrectionLevel = 0.0;
+	double DistanceFromWall = 0.0;
 	
 	//printf("img.cols=%d img.rows=%d\n", img.cols, img.rows); 
 
 	// 
 	//  Blur the image
 	// 
-	//Mat	blurInput = img;
-	//Mat blurOutput;
-	//int radius 			= (int)(blurRadius + 0.5);
-	//int kernelSize 		= 2*radius + 1;
-	//blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
-	////GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
+
+	blurRadius = 7.0;
+
+
+	Mat	blurInput = img;
+	Mat blurOutput;
+	int radius 			= (int)(blurRadius + 0.5);
+	int kernelSize 		= 2*radius + 1;
+	blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
+	//GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
 
 	// 
 	//  Convert img(BGR) -> hsvMat(HSV) color space
 	// 
-	Mat	cnvInput = img;
-	//Mat	cnvInput = blurOutput;
+	//Mat	cnvInput = img;
+	Mat	cnvInput = blurOutput;
 	Mat	cnvOutput;
 	cvtColor(cnvInput, cnvOutput, COLOR_BGR2HSV);
 	// 
@@ -519,15 +524,23 @@ static void ws_process(Mat& img) {
 			//cout<<"correction: "<<xCorrectionLevel<<endl;
 		}
 		
+		// Calculate the distance to the wall
+		DistanceFromWall = Distance(iNumPixels);
 
+	}
+	else {
+		printf("Why did we get here? oneRect.area()=%d theOtherRect.area()=%d\n", oneRect.area(), theOtherRect.area());
+	}
+
+Exit:
+	{
 		//
 		// Send back any values to the RoboRIO
 		//
 		char output[256];
 		int	Parm2	= 2;
 		int	Parm3	= 3;
-		double DistanceFromWall = Distance(iNumPixels);
-
+	
 		sprintf(output, "%4.3f,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
 		//printf("%4.3f,%5.3f,%d,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3, weightingBound);
 		printf("xCorrectionLevel=%4.3f, DistanceFromWall=%5.3f\n", xCorrectionLevel, DistanceFromWall);
@@ -537,11 +550,7 @@ static void ws_process(Mat& img) {
 		send(sockfd, output, strlen(output)+1, 0);
 #endif	//WS_USE_SOCKETS
 	}
-	else {
-		printf("Why did we get here? oneRect.area()=%d theOtherRect.area()=%d\n", oneRect.area(), theOtherRect.area());
-	}
 
-Exit:
 	return;
 }
 
