@@ -41,7 +41,10 @@ using namespace std;
 // *******************************************
 // Defines & Constants
 // *******************************************
-#define TRACE				// adds additional printf debug information
+//#define TRACE				// adds additional printf debug information
+//#define OVERRIDE_PARAMETER_FILE_READ
+//#define DRAW_ALL_CONTOURS
+
 #define WS_USE_SOCKETS
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.38"	// VisionTest on PC via WiFi
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.46"		// VisionTest on PC via direct connect
@@ -133,6 +136,8 @@ extern bool filter_init(const char * args, void** filter_ctx) {
     struct hostent *server;
 
     char buffer[256];
+
+	printf("CV_MAJOR_VERSION=%d CV_MINOR_VERSION=%d\n", CV_MAJOR_VERSION, CV_MINOR_VERSION);
 	
     portno = ROBORIO_PORT_ADDRESS;
     cout << "Opening socket" << endl;
@@ -374,6 +379,33 @@ static void ws_process(Mat& img) {
 	int weightingBound;
 	double xCorrectionLevel = 0.0;
 	double DistanceFromWall = 0.0;
+
+#ifdef OVERRIDE_PARAMETER_FILE_READ
+	int	iblurRadius = 0;
+	char *filename = "/home/pi/Override.txt";
+	FILE *fp = fopen(filename, "r");
+	if (fp == NULL) {
+		printf("ERROR: Unable to open file: %s\n", filename);
+		goto Continue;
+	}
+
+	fscanf(fp, "%d %d", &m_H_MIN, &m_H_MAX);
+	fscanf(fp, "%d %d", &m_S_MIN, &m_S_MAX);
+	fscanf(fp, "%d %d", &m_V_MIN, &m_V_MAX);
+	fscanf(fp, "%d", &iblurRadius);
+
+	blurRadius = iblurRadius;
+
+	fclose (fp);
+
+Continue:
+	printf("\n");
+	printf("m_H_MIN=%3d, m_H_MAX=%3d\n", m_H_MIN, m_H_MAX);
+	printf("m_S_MIN=%3d, m_S_MAX=%3d\n", m_S_MIN, m_S_MAX);
+	printf("m_V_MIN=%3d, m_V_MAX=%3d\n", m_V_MIN, m_V_MAX);
+	printf("blurRadius=%4.3f\n", blurRadius);
+	printf("\n");
+#endif //OVERRIDE_PARAMETER_FILE_READ
 	
 	//printf("img.cols=%d img.rows=%d\n", img.cols, img.rows); 
 
@@ -414,6 +446,10 @@ static void ws_process(Mat& img) {
 	vector < vector<Point> > contours;
 	vector < Vec4i > hierarchy;
 	findContours(findRangeInput, contours, hierarchy, RETR_TREE, CHAIN_APPROX_SIMPLE);
+#ifdef DRAW_ALL_CONTOURS
+	drawContours(img, contours, -1, (255,255,255), 3);
+#endif //DRAW_ALL_CONTOURS
+
 	//for(int i = 0; i < contours.size())
 	int closest = 0;
 	int secClose = 0;
