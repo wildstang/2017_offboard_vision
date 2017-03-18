@@ -44,6 +44,7 @@ using namespace std;
 //#define TRACE				// adds additional printf debug information
 //#define OVERRIDE_PARAMETER_FILE_READ
 //#define DRAW_ALL_CONTOURS
+//#define IMAGE_FILE_OVERRIDE
 
 #define WS_USE_SOCKETS
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.38"	// VisionTest on PC via WiFi
@@ -380,23 +381,40 @@ static void ws_process(Mat& img) {
 	double xCorrectionLevel = 0.0;
 	double DistanceFromWall = 0.0;
 
-#ifdef OVERRIDE_PARAMETER_FILE_READ
-	int	iblurRadius = 0;
-	char *filename = "/home/pi/Override.txt";
-	FILE *fp = fopen(filename, "r");
-	if (fp == NULL) {
-		printf("ERROR: Unable to open file: %s\n", filename);
-		goto Continue;
+#ifdef IMAGE_FILE_OVERRIDE
+	{
+        Mat image;
+		string filename = "/home/pi/RobotImage.jpg";
+		image = imread( filename, IMREAD_COLOR );
+		if(image.empty())
+		{
+			std::cerr << "Cannot read image file: " << filename << std::endl;
+			std::cerr << "Using Image from camera" << std::endl;
+		}
+		else
+			img = image.clone();
 	}
+#endif //IMAGE_FILE_OVERRIDE
 
-	fscanf(fp, "%d %d", &m_H_MIN, &m_H_MAX);
-	fscanf(fp, "%d %d", &m_S_MIN, &m_S_MAX);
-	fscanf(fp, "%d %d", &m_V_MIN, &m_V_MAX);
-	fscanf(fp, "%d", &iblurRadius);
-
-	blurRadius = iblurRadius;
-
-	fclose (fp);
+#ifdef OVERRIDE_PARAMETER_FILE_READ
+	{
+		int	iblurRadius = 0;
+		char *filename = "/home/pi/Override.txt";
+		FILE *fp = fopen(filename, "r");
+		if (fp == NULL) {
+			printf("ERROR: Unable to open file: %s\n", filename);
+			goto Continue;
+		}
+	
+		fscanf(fp, "%d %d", &m_H_MIN, &m_H_MAX);
+		fscanf(fp, "%d %d", &m_S_MIN, &m_S_MAX);
+		fscanf(fp, "%d %d", &m_V_MIN, &m_V_MAX);
+		fscanf(fp, "%d", &iblurRadius);
+	
+		blurRadius = iblurRadius;
+	
+		fclose (fp);
+	}
 
 Continue:
 	printf("\n");
@@ -593,6 +611,7 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 	
 	vector <double> similarity(contours.size());
 	vector <bool> UsableContour(contours.size());
+	int ImageCenterLine = IMAGE_CENTERLINE_P + offset;
 
 	//
 	// If there are not at least 2 contours found, just return since there is nothing to do.
@@ -606,15 +625,40 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 	// Go through the contours looking calculating the aspect ratios which can be used to find the
 	// rectangles that we are looking for.
 	//
-	
+
+	bool InExtremCloseupMode = false;
 	for (int i = 0; i < contours.size(); i++) {
 		Rect currentSize = boundingRect(contours[i]);
+
+		if (currentSize.area() > 17000) {
+			InExtremCloseupMode = true;
+		}
+	}
+
+
+	for (int i = 0; i < contours.size(); i++) {
+		Rect currentSize = boundingRect(contours[i]);
+		int rectangleCenterLine = currentSize.x + currentSize.width/2;
 
 		double MeasuredHeight 	= currentSize.height;
 		double MeasuredWidth 	= currentSize.width;
 
-		if (((MeasuredHeight < 20) || (MeasuredWidth < 10)) || 
-			 (MeasuredHeight > 500) || (MeasuredWidth > 700)) {
+		if (((MeasuredHeight < 20) || (MeasuredWidth < 27)) /*|| 
+			(MeasuredHeight > 500) || (MeasuredWidth > 700) */) {
+			similarity[i] = 10.;
+			UsableContour[i] = false;
+		}
+		else if ((InExtremCloseupMode == true) &&
+				 (abs(rectangleCenterLine-ImageCenterLine) < 50)) {
+//
+//				 (((currentSize.x > ImageCenterLine - 50) &&
+//				 (currentSize.x+currentSize.width < ImageCenterLine + 50)) ||
+//				  abs(rectangleCenterLine - ImageCenterLine) < 50)) {
+			// This is a blob so ignore
+			printf("x=%3d, w=%3d, y=%3d h=%3d a=%d rectangleCenterLine=%d ImageCenterLine=%d\n", 
+				   currentSize.x, currentSize .width, currentSize.y, currentSize.height, currentSize.area(),
+				   rectangleCenterLine, ImageCenterLine);
+
 			similarity[i] = 10.;
 			UsableContour[i] = false;
 		}
@@ -635,13 +679,17 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			// The closer this is to 0 the better the chance that we found the object that we are looking for!!!
 			// *************************************************************************************************
 			similarity[i] = fabs(1.0-((MeasuredHeight / MeasuredWidth)* STRIP_WIDTH/STRIP_HEIGHT));
-			if (similarity[i] > fabs(1.0- STRIP_WIDTH/STRIP_HEIGHT)) {
-				UsableContour[i] = false;
-			}
-			else {
-				UsableContour[i] = true;
-			}
+			UsableContour[i] = true;
+ //   		if (similarity[i] > fabs(1.0- STRIP_WIDTH/STRIP_HEIGHT)) {
+ //   			UsableContour[i] = false;
+ //   		}
+ //   		else {
+ //   			UsableContour[i] = true;
+//			}
 		}
+
+		//similarity[i] = fabs(1.0-((MeasuredHeight / MeasuredWidth)* STRIP_WIDTH/STRIP_HEIGHT));
+		//UsableContour[i] = true;
         
 		//if (similarity[i] < 10.) {
 		// 	// Display the "Potentially good" rectangles
@@ -671,7 +719,8 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			usable = 0;
 
 		testRect 	= boundingRect(contours.at(i));
-		if (UsableContour[i] == true) {
+		//if (UsableContour[i] == true) 
+		{
 			printf("BS similarity[i=%2d]=%6.3f Usable=%d x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
 				   i, similarity[i], usable, testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
 		}
@@ -751,23 +800,25 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			Rect testRect_j;
 			testRect_j 	= boundingRect(contours.at(j));
 
+
 			// This is a test to see if we are EXTREAMLY CLOSE...
 			// If we are, both areas are > 400000 so call it good and exit the loops.
-			if ((testRect_i.area() > 40000) && 
-				(testRect_j.area() > 40000)) {
-				closest = i;
-				secClose = j;
-				i = contours.size();
-				j = contours.size();
-				printf("EXTREME CLOSEUP!!!\n");
-				continue;
-			}
+			//if ((testRect_i.area() > 17000) && 
+			//	(testRect_j.area() > 17000)) {
+			//	closest = i;
+			//	secClose = j;
+			//	i = contours.size();
+			//	j = contours.size();
+			//	printf("EXTREME CLOSEUP!!!\n");
+			//	continue;
+			//}
 
 			// This test looks for the 2 rectangles that are the most similar in terms of size.
 			testMinDiff = abs(testRect_i.y - testRect_j.y) +
 				          abs(testRect_i.height - testRect_j.height) +
 				          //abs(testRect_i.x - testRect_j.x) +
-				          abs(testRect_i.width - testRect_j.width);
+				          abs(testRect_i.width - testRect_j.width) +
+						  abs(testRect_i.area() - testRect_i.area());
 			if (testMinDiff < MinDiff) {
 				closest = i;
 				secClose = j;
