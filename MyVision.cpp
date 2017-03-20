@@ -650,14 +650,12 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 		}
 		else if ((InExtremCloseupMode == true) &&
 				 (abs(rectangleCenterLine-ImageCenterLine) < 50)) {
-//
-//				 (((currentSize.x > ImageCenterLine - 50) &&
-//				 (currentSize.x+currentSize.width < ImageCenterLine + 50)) ||
-//				  abs(rectangleCenterLine - ImageCenterLine) < 50)) {
 			// This is a blob so ignore
-			printf("x=%3d, w=%3d, y=%3d h=%3d a=%d rectangleCenterLine=%d ImageCenterLine=%d\n", 
-				   currentSize.x, currentSize .width, currentSize.y, currentSize.height, currentSize.area(),
+#ifdef TRACE
+			printf("i=%d x=%3d, w=%3d, y=%3d h=%3d a=%d rectangleCenterLine=%d ImageCenterLine=%d\n", 
+				   i, currentSize.x, currentSize .width, currentSize.y, currentSize.height, currentSize.area(),
 				   rectangleCenterLine, ImageCenterLine);
+#endif //TRACE
 
 			similarity[i] = 10.;
 			UsableContour[i] = false;
@@ -687,9 +685,6 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
  //   			UsableContour[i] = true;
 //			}
 		}
-
-		//similarity[i] = fabs(1.0-((MeasuredHeight / MeasuredWidth)* STRIP_WIDTH/STRIP_HEIGHT));
-		//UsableContour[i] = true;
         
 		//if (similarity[i] < 10.) {
 		// 	// Display the "Potentially good" rectangles
@@ -698,15 +693,6 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 
 		//printf("i=%d similarity=%f Height=%d Width=%d\n" ,i, similarity[i], (int) MeasuredHeight, (int) MeasuredWidth);
 	}
-	/*int i = 0;
-	while(i < contours.size()){
-		if(similarity[i] >= 9.9){
-			contours.erase (contours.begin() + i);
-			similarity.erase (similarity.begin() + i);
-		} else {
-			i++;
-		}
-	}*/
 
 #ifdef TRACE
 	for(int i = 0; i < contours.size() ; i++){
@@ -799,19 +785,6 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 
 			Rect testRect_j;
 			testRect_j 	= boundingRect(contours.at(j));
-
-
-			// This is a test to see if we are EXTREAMLY CLOSE...
-			// If we are, both areas are > 400000 so call it good and exit the loops.
-			//if ((testRect_i.area() > 17000) && 
-			//	(testRect_j.area() > 17000)) {
-			//	closest = i;
-			//	secClose = j;
-			//	i = contours.size();
-			//	j = contours.size();
-			//	printf("EXTREME CLOSEUP!!!\n");
-			//	continue;
-			//}
 
 			// This test looks for the 2 rectangles that are the most similar in terms of size.
 			testMinDiff = abs(testRect_i.y - testRect_j.y) +
