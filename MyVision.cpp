@@ -20,6 +20,7 @@
 #include <iostream>
 #include <math.h>
 
+#include <unistd.h>	// for sleep()
 
 #include <time.h>
 #include <stdlib.h>
@@ -282,6 +283,8 @@ static void* SocketConnectionThread(void *arg)
 		//
 		// P.Poppe 2/18/2017
 		// Watch out!!! recv() does not necessarily receive all the data that was sent...
+		// For the moment, sleep for a bit assuming that the server eill send the relevent information right away.
+		sleep(2);
 		//
 		//n = SocketReadln(sockfd, buffer, 255);
 		n = recv(sockfd,buffer,255, 0);
