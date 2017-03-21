@@ -423,8 +423,8 @@ static void ws_process(Mat& img) {
 	
 	Rect oneRect;
 	Rect theOtherRect;
-	int middleOfOneRect;
-	int middleOfOtherRect;
+	int boundingEdgeOneRect;
+	int boundingEdgeOtherRect;
 	int distanceBetweenRects;
 	
 	int leftBound;
@@ -574,11 +574,11 @@ Continue:
 	int avgX;
 
 	if(oneRect.area() > 0 && theOtherRect.area() > 0){
-		middleOfOneRect = oneRect.x + (oneRect.width / 2);
-		middleOfOtherRect = theOtherRect.x + (theOtherRect.width / 2);
+		boundingEdgeOneRect = oneRect.x + oneRect.width;
+		boundingEdgeOtherRect = theOtherRect.x;
 		
 		avgX = (middleOfOneRect + middleOfOtherRect)/2;
-		distanceBetweenRects = abs(middleOfOneRect - middleOfOtherRect);
+		distanceBetweenRects = abs(boundingEdgeOneRect - boundingEdgeOtherRect);
 		int	iNumPixels 	= distanceBetweenRects;
 
 		// Put a line on the "calculated" center
