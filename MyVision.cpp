@@ -73,8 +73,9 @@ using namespace std;
 // *******************************************
 // Local Variables
 // *******************************************
-static timespec tsPrev;	// Previous Time
-static pthread_t tid;	// Thread Id for the processing Image Processing Thread (ws_process())
+static timespec tsPrev;				// Previous Time
+static pthread_t tid_SlaveImgProc;	// Thread Id for the processing Image Processing Thread (ws_process())
+static pthread_t tid_SocketConnect;	// Thread Id for the thread responsible for connecting to the visionServer/RoboRio
 
 static int m_H_MIN 		= 0;
 static int m_S_MIN 		= 0;
@@ -90,16 +91,19 @@ static double blurRadius= 5.0;
 
 static int sockfd;
 
+static sem_t sem_SocketConnect;
 static sem_t sem_ImageProcessed;
 static sem_t sem_ImageAvailableToProcess;
 
 static Mat SlaveProcessImage;	// Image passed between main thread and image processing thread.
 static bool FirstTime = true;
 static bool RunThread = true;
+static bool SocketConnected = false;
 
 // *******************************************
 // Local Prototypes
 // *******************************************
+static void* SocketConnectionThread(void *arg);
 static void* SlaveImgProcessThread(void *arg);
 static void ws_process(Mat& img);
 static double TimeDiffInSec(timespec *start, timespec *stop);
@@ -127,139 +131,26 @@ extern "C" {
     filter_process function, and should be freed by the filter_free function
 */
 extern bool filter_init(const char * args, void** filter_ctx) {
-	//Set client
-	//Set IP address
-
-#ifdef WS_USE_SOCKETS
-    int portno, n;
-
-    struct sockaddr_in serv_addr;
-    struct hostent *server;
-
-    char buffer[256];
-
-	printf("CV_MAJOR_VERSION=%d CV_MINOR_VERSION=%d\n", CV_MAJOR_VERSION, CV_MINOR_VERSION);
-	
-    portno = ROBORIO_PORT_ADDRESS;
-    cout << "Opening socket" << endl;
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0)
-    {
-    	cout << "Could not open socket" << endl;
-        error("ERROR opening socket");
-    }
-
-    cout << "Getting host name" << endl;
-    server = gethostbyname(ROBORIO_IP_ADDRESS);
-    if (server == NULL) {
-        cout << "ERROR, no such host" << endl;
-        exit(0);
-    }
-
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
-    serv_addr.sin_port = htons(portno);
-
-	//
-	// P.Poppe 2/18/2017
-	//	Wait for the connection...
-	int	Count = 0;
-    cout << "Attempting to connect: " << ROBORIO_IP_ADDRESS << " Port: " << ROBORIO_PORT_ADDRESS << endl;
-	cout << "." << std::flush;
-	Count++;
-	while (connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr)) < 0) {
-		if ((Count % 1000) == 0) {
-			cout << "." << std::flush;
-		}
-		Count++;
-	}
-    cout << endl;
-    cout << "Connected" << endl;
-
-    bzero(buffer,256);
-
-	//
-	// P.Poppe 2/18/2017
-	// Watch out!!! recv() does not necessarily receive all the data that was sent...
-	//
-	//n = SocketReadln(sockfd, buffer, 255);
-    n = recv(sockfd,buffer,255, 0);
-    cout << "Received data" << endl;
-    if (n < 0)
-    {
-    	error("ERROR reading from socket");
-    }
-
-    printf("%s\n",buffer);
-
-    // Parse config string
-    char *token;
-
-	/* get the first token */
-	token = strtok(buffer, "|\n");
-
-	int count = 0;
-	/* walk through other tokens */
-	while( token != NULL )
-	{
-		printf( " %s\n", token );
-		if (count == 0)
-		{
-			m_H_MIN = atoi(token);
-		}
-		if (count == 1)
-		{
-			m_S_MIN = atoi(token);
-		}
-		if (count == 2)
-		{
-			m_V_MIN = atoi(token);
-		}
-		if (count == 3)
-		{
-			m_H_MAX = atoi(token);
-		}
-		if (count == 4)
-		{
-			m_S_MAX = atoi(token);
-		}
-		if (count == 5)
-		{
-			m_V_MAX = atoi(token);
-		}
-		if (count == 6)
-		{
-			offset = atoi(token);
-		}
-		if (count == 7)
-		{
-			thresholdX = atoi(token);
-		}
-		if (count == 8)
-		{
-			blurRadius = atof(token);
-		}
-
-		token = strtok(NULL, "|\n");
-		count++;
-	}
-
-	printf("Hmin = %d\nSmin = %d\nVmin = %d\nHmax = %d\nSmax = %d\nVmax = %d\nOffset = %d\nThreshold = %d\nBlur Radius = %f\n", m_H_MIN, m_S_MIN, m_V_MIN, m_H_MAX, m_S_MAX, m_V_MAX, offset, thresholdX, blurRadius);
-#endif
 
 	// Create the semaphores for signalling that to the slave thread that there is work to be done and
 	// for the slave thread to signal when it has completed processing the image.
+	sem_init(&sem_SocketConnect, 0, 1); 			// set to initial value of 1 indicating that the Socket Connection Thread should attempt to connect 
 	sem_init(&sem_ImageProcessed, 0, 1); 			// set to initial value of 1 indicating that the "image" is ready to the main thread.
 	sem_init(&sem_ImageAvailableToProcess, 0, 0); 	// set to initial value of 0 indicating that the "image" is not available to the slave thread
 
 	// Spawn off the worker thread
 	int err;
-	err = pthread_create(&tid, NULL, &SlaveImgProcessThread, NULL);
+	err = pthread_create(&tid_SocketConnect, NULL, &SocketConnectionThread, NULL);
 	if (err != 0)
-		printf("\ncan't create thread :[%s]", strerror(err));
+		printf("\ncan't create thread SocketConnectionThread() :[%s]", strerror(err));
 	else
-		printf("\n Thread created successfully\n");
+		printf("\n SocketConnectionThread(): Thread created successfully\n");
+
+	err = pthread_create(&tid_SlaveImgProc, NULL, &SlaveImgProcessThread, NULL);
+	if (err != 0)
+		printf("\ncan't create thread SlaveImgProcessThread() :[%s]", strerror(err));
+	else
+		printf("\n SlaveImgProcessThread(): Thread created successfully\n");
 
 	//{
 	//	char	SystemCmd[128];
@@ -315,11 +206,162 @@ void filter_free(void* filter_ctx) {
 // *******************************************
 // Local Function Definitions
 // *******************************************
+static void* SocketConnectionThread(void *arg)
+{
+	timespec 	tsStart;
+	timespec 	tsEnd;
+	double 		Frame2FrameTimeInSec = 0.0;
+
+	// This is the slave thread which is responsible for the following:
+	// 
+	// 1. Wait for an image
+	// 2. Process the image via ws_process()
+	// 3. Resize the image
+	// 4. Let the main thread know that the image is ready to be sent out to the SmartDashboard
+	// 
+
+	printf("%s(): Started\n", __FUNCTION__);
+
+	while (RunThread == true ) {
+
+		// Wait for the main thread to tell this thread that an image is available to be processed
+		sem_wait(&sem_SocketConnect);
+		
+		//Set client
+		//Set IP address
+
+#ifdef WS_USE_SOCKETS
+		int portno, n;
+	
+		struct sockaddr_in serv_addr;
+		struct hostent *server;
+	
+		char buffer[256];
+	
+		printf("CV_MAJOR_VERSION=%d CV_MINOR_VERSION=%d\n", CV_MAJOR_VERSION, CV_MINOR_VERSION);
+		
+		portno = ROBORIO_PORT_ADDRESS;
+		cout << "Opening socket" << endl;
+		sockfd = socket(AF_INET, SOCK_STREAM, 0);
+		if (sockfd < 0)
+		{
+			cout << "Could not open socket" << endl;
+			error("ERROR opening socket");
+		}
+	
+		cout << "Getting host name" << endl;
+		server = gethostbyname(ROBORIO_IP_ADDRESS);
+		if (server == NULL) {
+			cout << "ERROR, no such host" << endl;
+			exit(0);
+		}
+	
+		bzero((char *) &serv_addr, sizeof(serv_addr));
+		serv_addr.sin_family = AF_INET;
+		bcopy((char *)server->h_addr, (char *)&serv_addr.sin_addr.s_addr, server->h_length);
+		serv_addr.sin_port = htons(portno);
+	
+		//
+		// P.Poppe 2/18/2017
+		//	Wait for the connection...
+		int	Count = 0;
+		cout << "Attempting to connect: " << ROBORIO_IP_ADDRESS << " Port: " << ROBORIO_PORT_ADDRESS << endl;
+		cout << "." << std::flush;
+		Count++;
+		while (connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr)) < 0) {
+			if ((Count % 1000) == 0) {
+				cout << "." << std::flush;
+			}
+			Count++;
+		}
+		cout << endl;
+		cout << "Connected" << endl;
+	
+		bzero(buffer,256);
+	
+		//
+		// P.Poppe 2/18/2017
+		// Watch out!!! recv() does not necessarily receive all the data that was sent...
+		//
+		//n = SocketReadln(sockfd, buffer, 255);
+		n = recv(sockfd,buffer,255, 0);
+		cout << "Received data" << endl;
+		if (n < 0)
+		{
+			error("ERROR reading from socket");
+		}
+	
+		printf("%s\n",buffer);
+	
+		// Parse config string
+		char *token;
+	
+		/* get the first token */
+		token = strtok(buffer, "|\n");
+	
+		int count = 0;
+		/* walk through other tokens */
+		while( token != NULL )
+		{
+			printf( " %s\n", token );
+			if (count == 0)
+			{
+				m_H_MIN = atoi(token);
+			}
+			if (count == 1)
+			{
+				m_S_MIN = atoi(token);
+			}
+			if (count == 2)
+			{
+				m_V_MIN = atoi(token);
+			}
+			if (count == 3)
+			{
+				m_H_MAX = atoi(token);
+			}
+			if (count == 4)
+			{
+				m_S_MAX = atoi(token);
+			}
+			if (count == 5)
+			{
+				m_V_MAX = atoi(token);
+			}
+			if (count == 6)
+			{
+				offset = atoi(token);
+			}
+			if (count == 7)
+			{
+				thresholdX = atoi(token);
+			}
+			if (count == 8)
+			{
+				blurRadius = atof(token);
+			}
+	
+			token = strtok(NULL, "|\n");
+			count++;
+		}
+	
+		printf("Hmin = %d\nSmin = %d\nVmin = %d\nHmax = %d\nSmax = %d\nVmax = %d\nOffset = %d\nThreshold = %d\nBlur Radius = %f\n", m_H_MIN, m_S_MIN, m_V_MIN, m_H_MAX, m_S_MAX, m_V_MAX, offset, thresholdX, blurRadius);
+
+		SocketConnected = true;
+#endif
+	}
+
+	return NULL;
+}
+
 static void* SlaveImgProcessThread(void *arg)
 {
 	timespec 	tsStart;
 	timespec 	tsEnd;
 	double 		Frame2FrameTimeInSec = 0.0;
+	char		TrueStr[] 	= "True";
+	char		FalseStr[] 	= "False";
+	char		*DisplayStr;
 
 	// This is the slave thread which is responsible for the following:
 	// 
@@ -348,10 +390,17 @@ static void* SlaveImgProcessThread(void *arg)
 
 		// Display the image processing time and frame rate
 		Frame2FrameTimeInSec = TimeDiffInSec(&tsPrev, &tsStart);
-		printf("F2F=%5.4f S2E=%5.4f fps=%5.3f\n\n",
+		if (SocketConnected == true) {
+			DisplayStr = TrueStr;
+		}
+		else {
+			DisplayStr = FalseStr;
+		}
+
+		printf("F2F=%5.4f S2E=%5.4f fps=%5.3f Connected=%s\n\n",
 			   Frame2FrameTimeInSec,
 			   TimeDiffInSec(&tsStart, &tsEnd),
-			   1./Frame2FrameTimeInSec);
+			   1./Frame2FrameTimeInSec, DisplayStr);
 		tsPrev = tsStart;
 
 		// Let the main thread know that the image has been processed
@@ -585,22 +634,29 @@ Continue:
 	}
 
 Exit:
-	{
+	if (SocketConnected == true) {
 		//
 		// Send back any values to the RoboRIO
 		//
 		char output[256];
 		int	Parm2	= 2;
 		int	Parm3	= 3;
-	
+
 		sprintf(output, "%4.3f,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
 		//printf("%4.3f,%5.3f,%d,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3, weightingBound);
 		printf("xCorrectionLevel=%4.3f, DistanceFromWall=%5.3f\n", xCorrectionLevel, DistanceFromWall);
 		//cout<<"correction: "<<xCorrectionLevel<<endl;
 		//printf("%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
 #ifdef WS_USE_SOCKETS
+		int	ret;
 		printf("%s", output);
-		send(sockfd, output, strlen(output)+1, 0);
+		ret = send(sockfd, output, strlen(output)+1, 0);
+		if (ret < 0) {
+			SocketConnected = false;
+
+			// Tell the slave process that another image is available for it to process.
+			sem_post(&sem_SocketConnect);
+		}
 #endif	//WS_USE_SOCKETS
 	}
 
