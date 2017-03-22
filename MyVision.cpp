@@ -64,8 +64,8 @@ using namespace std;
 //
 // distance = f(pixels) = DISTANCE_A + DISTANCE_B/pixels
 // 
-#define DISTANCE_A			-1.6454052
-#define DISTANCE_B			5124.81531
+#define DISTANCE_A			-2.03785849
+#define DISTANCE_B			4363.144182
 
 // *******************************************
 // Local Structures
@@ -577,7 +577,7 @@ Continue:
 		boundingEdgeOneRect = oneRect.x + oneRect.width;
 		boundingEdgeOtherRect = theOtherRect.x;
 		
-		avgX = (middleOfOneRect + middleOfOtherRect)/2;
+		avgX = (boundingEdgeOneRect + boundingEdgeOtherRect)/2;
 		distanceBetweenRects = abs(boundingEdgeOneRect - boundingEdgeOtherRect);
 		int	iNumPixels 	= distanceBetweenRects;
 
