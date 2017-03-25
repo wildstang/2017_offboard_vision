@@ -78,13 +78,31 @@ static timespec tsPrev;				// Previous Time
 static pthread_t tid_SlaveImgProc;	// Thread Id for the processing Image Processing Thread (ws_process())
 static pthread_t tid_SocketConnect;	// Thread Id for the thread responsible for connecting to the visionServer/RoboRio
 
-static int m_H_MIN 		= 0;
-static int m_S_MIN 		= 0;
-static int m_V_MIN 		= 245;
-  
-static int m_H_MAX 		= 0;
-static int m_S_MAX 		= 0;
-static int m_V_MAX 		= 255;
+static bool InExtremCloseupMode 	= false;
+
+// These are the parameters that are used for thresholding
+static int m_H_MIN 			= 0;
+static int m_S_MIN 			= 0;
+static int m_V_MIN 			= 0;
+static int m_H_MAX 			= 0;
+static int m_S_MAX 			= 0;
+static int m_V_MAX 			= 0;
+
+// The thresholding parameters above are set to this if we detect that we are in "InExtremCloseupMode"
+static int m_H_MIN_close 	= 70;
+static int m_H_MAX_close 	= 180;
+static int m_S_MIN_close 	= 0;
+static int m_S_MAX_close 	= 255;
+static int m_V_MIN_close 	= 172;
+static int m_V_MAX_close 	= 255;
+
+// The thresholding parameters above are set to this if we detect that we are NOT in "InExtremCloseupMode"
+static int m_H_MIN_far 		= 73;
+static int m_H_MAX_far 		= 180;
+static int m_S_MIN_far 		= 0;
+static int m_S_MAX_far 		= 255;
+static int m_V_MIN_far 		= 172;
+static int m_V_MAX_far 		= 255;
 
 static int offset 		= 0;
 static int thresholdX 	= 50;
@@ -113,7 +131,11 @@ static int SocketReadln(int Socket, char *DestBuf, int MaxNumChars);
 static double Distance(int pixelWidth);
 static void error(const char *msg);
 static void ResizeImage(Mat &src, Mat &dst);
-static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int &secClose);
+static bool ContourLocatorExtremeCloseupMode(vector < vector<Point> > &contours, int &closest, int &secClose);
+static bool ContourLocatorFarMode(vector < vector<Point> > &contours, int &closest, int &secClose);
+static bool ExtremeCloseupModeGet(vector < vector<Point> > &contours);
+static void ThresholdExtremeCloseupSet(void);
+static void ThresholdFarSet(void);
 
 
 // exports for the filter
@@ -132,6 +154,8 @@ extern "C" {
     filter_process function, and should be freed by the filter_free function
 */
 extern bool filter_init(const char * args, void** filter_ctx) {
+	// This is the main initialization function that is called by the mjpg-streamer. 
+	// This function MUST exist even if it does nothing.
 
 	// Create the semaphores for signalling that to the slave thread that there is work to be done and
 	// for the slave thread to signal when it has completed processing the image.
@@ -153,19 +177,6 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 	else
 		printf("\n SlaveImgProcessThread(): Thread created successfully\n");
 
-	//{
-	//	char	SystemCmd[128];
-	//	int		exposure_absolute = 100;
-    //
-	//	// Turn off auto focus and set the exposure value on the camera
-	//	//system("v4l2-ctl -d /dev/video0 -c focus_auto=1");
-    //
-	//	// Turn off auto exposure and set the exposure value on the camera
-	//	system("v4l2-ctl -d /dev/video0 -c exposure_auto=1");
-	//	sprintf(SystemCmd, "v4l2-ctl -d /dev/video0 -c exposure_absolute=%d", exposure_absolute);
-	//	system(SystemCmd);
-	//}
-
 	clock_gettime(CLOCK_REALTIME, &tsPrev);
 
 
@@ -174,6 +185,8 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 
 
 extern void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
+	// This is the main fil;ter function that is called once per imaged. It is called by the mjpg-streamer. 
+	// This function MUST exist even if it does nothing.
 
 
 	// Wait for the slave thread to indicate that it has completed processing the previous image
@@ -201,6 +214,8 @@ extern void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
 
 
 void filter_free(void* filter_ctx) {
+	// This is the main cleanup/termination  function that is called by the mjpg-streamer. 
+	// This function MUST exist even if it does nothing.
 
 }
 
@@ -364,7 +379,8 @@ static void* SlaveImgProcessThread(void *arg)
 	double 		Frame2FrameTimeInSec = 0.0;
 	char		TrueStr[] 	= "True";
 	char		FalseStr[] 	= "False";
-	char		*DisplayStr;
+	char		*ConnectedStr;
+	char		*InExtremeCloseupModeStr;
 
 	// This is the slave thread which is responsible for the following:
 	// 
@@ -393,17 +409,23 @@ static void* SlaveImgProcessThread(void *arg)
 
 		// Display the image processing time and frame rate
 		Frame2FrameTimeInSec = TimeDiffInSec(&tsPrev, &tsStart);
-		if (SocketConnected == true) {
-			DisplayStr = TrueStr;
-		}
-		else {
-			DisplayStr = FalseStr;
-		}
 
-		printf("F2F=%5.4f S2E=%5.4f fps=%5.3f Connected=%s\n\n",
+		if (SocketConnected == true)
+			ConnectedStr = TrueStr;
+		else
+			ConnectedStr = FalseStr;
+
+		if (InExtremCloseupMode == true)
+			InExtremeCloseupModeStr = TrueStr;
+		else
+			InExtremeCloseupModeStr = FalseStr;
+
+		printf("F2F=%5.4f S2E=%5.4f fps=%6.3f Connected=%s ExtremeCloseup=%s\n\n",
 			   Frame2FrameTimeInSec,
 			   TimeDiffInSec(&tsStart, &tsEnd),
-			   1./Frame2FrameTimeInSec, DisplayStr);
+			   1./Frame2FrameTimeInSec, 
+			   ConnectedStr,
+			   InExtremeCloseupModeStr);
 		tsPrev = tsStart;
 
 		// Let the main thread know that the image has been processed
@@ -432,6 +454,11 @@ static void ws_process(Mat& img) {
 	int weightingBound;
 	double xCorrectionLevel = 0.0;
 	double DistanceFromWall = 0.0;
+
+	// hsvMat is a copy of the origianl image that we process an "blur". 
+	// We really don't want this image to be sent back to the SmartDashboard though
+	hsvMat = img.clone();
+
 
 #ifdef IMAGE_FILE_OVERRIDE
 	{
@@ -484,7 +511,7 @@ Continue:
 	// 
 
 	//blurRadius = 7.0;
-	Mat	blurInput = img;
+	Mat	blurInput = hsvMat;
 	Mat blurOutput;
 	int radius 			= (int)(blurRadius + 0.5);
 	int kernelSize 		= 2*radius + 1;
@@ -520,13 +547,40 @@ Continue:
 	drawContours(img, contours, -1, (255,255,255), 3);
 #endif //DRAW_ALL_CONTOURS
 
-	//for(int i = 0; i < contours.size())
+	// find the "best" 2 rectangles that match what what we are looking for
 	int closest = 0;
 	int secClose = 0;
-	bool shouldContinue = ContourLocator(contours, closest, secClose);
+	bool shouldContinue 		= false;
+
+	InExtremCloseupMode = ExtremeCloseupModeGet(contours);
+
+	if (InExtremCloseupMode == true) {
+		// set the thresholds for the next go around
+		//ThresholdExtremeCloseupSet();
+
+		// now find the ROIs that we are interested in
+		shouldContinue = ContourLocatorExtremeCloseupMode(contours, closest, secClose);
+	}
+	else {
+		// set the thresholds for the next go around
+		//ThresholdFarSet();
+
+		// now find the ROIs that we are interested in
+		shouldContinue = ContourLocatorFarMode(contours, closest, secClose);
+	}
+	if(!shouldContinue){
+		ThresholdFarSet();
+		goto Exit;
+	}
+
 	cout<<"closest: "<<closest<<endl;
 	cout<<"secClose: "<<secClose<<endl;
-	if(!shouldContinue){
+
+	if (SocketConnected != true) {
+		// Make a BIG X indicating that no communication with the RoboRIO is happening
+		// There is nothing else to do so just exit.
+		line(img, Point(0, 0), Point(img.cols, img.rows), Scalar(0,0,255), 2);
+		line(img, Point(0, img.rows), Point(img.cols, 0), Scalar(0,0,255), 2);
 		goto Exit;
 	}
 
@@ -630,7 +684,6 @@ Continue:
 		
 		// Calculate the distance to the wall
 		DistanceFromWall = Distance(iNumPixels);
-
 	}
 	else {
 		printf("Why did we get here? oneRect.area()=%d theOtherRect.area()=%d\n", oneRect.area(), theOtherRect.area());
@@ -666,7 +719,7 @@ Exit:
 	return;
 }
 
-static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int &secClose){
+static bool ContourLocatorExtremeCloseupMode(vector < vector<Point> > &contours, int &closest, int &secClose){
 	
 	vector <double> similarity(contours.size());
 	vector <bool> UsableContour(contours.size());
@@ -681,20 +734,9 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 	}
 
 	//
-	// Go through the contours looking calculating the aspect ratios which can be used to find the
+	// Go through the contours calculating the aspect ratios which can be used to find the
 	// rectangles that we are looking for.
 	//
-
-	bool InExtremCloseupMode = false;
-	for (int i = 0; i < contours.size(); i++) {
-		Rect currentSize = boundingRect(contours[i]);
-
-		if (currentSize.area() > 17000) {
-			InExtremCloseupMode = true;
-		}
-	}
-
-
 	for (int i = 0; i < contours.size(); i++) {
 		Rect currentSize = boundingRect(contours[i]);
 		int rectangleCenterLine = currentSize.x + currentSize.width/2;
@@ -707,8 +749,12 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 			similarity[i] = 10.;
 			UsableContour[i] = false;
 		}
-		else if ((InExtremCloseupMode == true) &&
-				 (abs(rectangleCenterLine-ImageCenterLine) < 50)) {
+		else if (currentSize.area() < 15000) {
+			// this is reflection of some form so ignore
+			similarity[i] = 10.;
+			UsableContour[i] = false;
+		}
+		else if (abs(rectangleCenterLine-ImageCenterLine) < 50) {
 			// This is a blob so ignore
 #ifdef TRACE
 			printf("i=%d x=%3d, w=%3d, y=%3d h=%3d a=%d rectangleCenterLine=%d ImageCenterLine=%d\n", 
@@ -871,6 +917,231 @@ static bool ContourLocator(vector < vector<Point> > &contours, int &closest, int
 #endif //TRACE
 
 	return true;
+}
+
+static bool ContourLocatorFarMode(vector < vector<Point> > &contours, int &closest, int &secClose){
+	
+	vector <double> similarity(contours.size());
+	vector <bool> UsableContour(contours.size());
+	int ImageCenterLine = IMAGE_CENTERLINE_P + offset;
+
+	//
+	// If there are not at least 2 contours found, just return since there is nothing to do.
+	//
+	if (contours.size() <= 1) {
+		// nothing to do so just return
+		return false;
+	}
+
+	//
+	// Go through the contours looking calculating the aspect ratios which can be used to find the
+	// rectangles that we are looking for.
+	//
+	for (int i = 0; i < contours.size(); i++) {
+		Rect currentSize = boundingRect(contours[i]);
+		int rectangleCenterLine = currentSize.x + currentSize.width/2;
+
+		double MeasuredHeight 	= currentSize.height;
+		double MeasuredWidth 	= currentSize.width;
+
+		if (((MeasuredHeight < 25) || (MeasuredWidth < 10)) /*|| 
+			(MeasuredHeight > 500) || (MeasuredWidth > 700) */) {
+			similarity[i] = 10.;
+			UsableContour[i] = false;
+		}
+		else
+		{
+			// *************************************************************************************************
+			// The similarity is calculated as follows:
+			// 
+			// 			 Measured Height   STRIP_WIDTH
+			// fabs(1 -  --------------- x -----------  )
+			//			 Measured Width	   STRIP_HEIGTH
+			// 
+			// This calculation should produce a range:
+			// 			0 <= similarity <= 1.0
+			// 
+			// Essentially, this is trying to find the object with the closest aspect ratio to the one we are trying to find.
+			//
+			// The closer this is to 0 the better the chance that we found the object that we are looking for!!!
+			// *************************************************************************************************
+			similarity[i] = fabs(1.0-((MeasuredHeight / MeasuredWidth)* STRIP_WIDTH/STRIP_HEIGHT));
+			UsableContour[i] = true;
+ //   		if (similarity[i] > fabs(1.0- STRIP_WIDTH/STRIP_HEIGHT)) {
+ //   			UsableContour[i] = false;
+ //   		}
+ //   		else {
+ //   			UsableContour[i] = true;
+//			}
+		}
+        
+		//if (similarity[i] < 10.) {
+		// 	// Display the "Potentially good" rectangles
+		//	rectangle(img, Point(currentSize.x, currentSize.y), Point(currentSize.x + currentSize.width, currentSize.y + currentSize.height), Scalar(0, 255, 0), 2);
+		//}
+
+		//printf("i=%d similarity=%f Height=%d Width=%d\n" ,i, similarity[i], (int) MeasuredHeight, (int) MeasuredWidth);
+	}
+
+#ifdef TRACE
+	for(int i = 0; i < contours.size() ; i++){
+		Rect testRect;
+		int	usable=-1;
+
+		if (UsableContour[i])
+			usable = 1;
+		else
+			usable = 0;
+
+		testRect 	= boundingRect(contours.at(i));
+		//if (UsableContour[i] == true) 
+		{
+			printf("BS similarity[i=%2d]=%6.3f Usable=%d x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
+				   i, similarity[i], usable, testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
+		}
+	}
+	printf("\n");
+#endif //TRACE
+
+	// Now lets sort them from best similarity (lowest number) to worst similarity (highest number)
+	double 			tmpSimilarity;
+	vector<Point>	tmpContour;
+	bool			tmpUsableContour;
+
+	for(int i = 0; i < contours.size() ; i++){
+		for(int j = 0; j < contours.size()-i-1; j++){
+			if (similarity[j] > similarity[j+1]) {
+
+				tmpSimilarity 	= similarity[j];
+				similarity[j] 	= similarity[j+1];
+				similarity[j+1] = tmpSimilarity;
+
+				tmpContour  	= contours[j];
+				contours[j] 	= contours[j+1];
+				contours[j+1] 	= tmpContour;
+
+				tmpUsableContour 	= UsableContour[j];
+				UsableContour[j] 	= UsableContour[j+1];
+				UsableContour[j+1] 	= tmpUsableContour;
+			}
+		}
+	}
+
+#ifdef TRACE
+	//for(int i = 0; i < contours.size() ; i++){
+	//	Rect testRect;
+	//	int	usable=-1;
+	//	if (UsableContour[i]) {
+	//		usable = 1;
+	//	}
+	//	else
+	//		usable = 0;
+    //
+	//	testRect 	= boundingRect(contours.at(i));
+	//	printf("AS similarity[i=%2d]=%6.3f Usable=%d x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
+	//		   i, similarity[i], usable, testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
+	//}
+	//printf("\n");
+#endif //TRACE
+
+	int count = 0;
+	for(int i = 0; i < UsableContour.size(); i++){
+		if(UsableContour[i]){
+			count++;
+		}
+	}
+
+	if(count < 2){
+		return false;
+	}
+
+	int	MinDiff = 100000000;
+	int	testMinDiff;
+
+	for(int i = 0; i < contours.size() ; i++){
+		if (UsableContour[i] == false) {
+			continue;
+		}
+
+		Rect testRect_i;
+		testRect_i 	= boundingRect(contours.at(i));
+
+		for(int j = 0; j < contours.size(); j++){
+			if ((UsableContour[j] == false) || 
+				(i == j)) {
+				continue;
+			}
+
+			Rect testRect_j;
+			testRect_j 	= boundingRect(contours.at(j));
+
+			// This test looks for the 2 rectangles that are the most similar in terms of size.
+			testMinDiff = abs(testRect_i.y - testRect_j.y) +
+				          abs(testRect_i.height - testRect_j.height) +
+				          //abs(testRect_i.x - testRect_j.x) +
+				          abs(testRect_i.width - testRect_j.width) 
+						  //+ abs(testRect_i.area() - testRect_i.area())
+							;
+			if (testMinDiff < MinDiff) {
+				closest = i;
+				secClose = j;
+				MinDiff = testMinDiff;
+			}
+		}
+	}
+
+#ifdef TRACE
+	for(int i = 0; i < contours.size() ; i++){
+		Rect testRect;
+		testRect 	= boundingRect(contours.at(i));
+		if (UsableContour[i] == true) {
+			printf("similarity[i=%2d]=%6.3f x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
+				   i, similarity[i], testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
+		}
+	}
+#endif //TRACE
+
+	return true;
+}
+
+static bool ExtremeCloseupModeGet(vector < vector<Point> > &contours)
+{
+	bool 	InExtremCloseupMode = false;
+	int		Count = 0;
+
+	for (int i = 0; i < contours.size(); i++) {
+		Rect currentSize = boundingRect(contours[i]);
+
+		if (currentSize.area() > 17000) {
+			Count++;
+		}
+	}
+
+	if (Count >= 2) {
+		InExtremCloseupMode = true;
+	}
+
+	return InExtremCloseupMode;
+}
+
+static void ThresholdExtremeCloseupSet(void)
+{
+	m_H_MIN = m_H_MIN_close;
+	m_H_MAX = m_H_MAX_close;
+	m_S_MIN = m_S_MIN_close;
+	m_S_MAX = m_S_MAX_close;
+	m_V_MIN = m_V_MIN_close;
+	m_V_MAX = m_V_MAX_close;
+}
+
+static void ThresholdFarSet(void)
+{
+	m_H_MIN = m_H_MIN_far;
+	m_H_MAX = m_H_MAX_far;
+	m_S_MIN = m_S_MIN_far;
+	m_S_MAX = m_S_MAX_far;
+	m_V_MIN = m_V_MIN_far;
+	m_V_MAX = m_V_MAX_far;
 }
 
 static double Distance(int pixelWidth){
