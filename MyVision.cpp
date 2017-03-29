@@ -74,9 +74,11 @@ using namespace std;
 // *******************************************
 // Local Variables
 // *******************************************
-static timespec tsPrev;				// Previous Time
-static pthread_t tid_SlaveImgProc;	// Thread Id for the processing Image Processing Thread (ws_process())
-static pthread_t tid_SocketConnect;	// Thread Id for the thread responsible for connecting to the visionServer/RoboRio
+static timespec tsPrev;					// Previous Time
+static pthread_t tid_KeyboardControl;	// Thread Id for KeyboardControlThread()
+static pthread_t tid_SlaveSaveImage;	// Thread Id for SaveImagesThread()
+static pthread_t tid_SlaveImgProc;		// Thread Id for processing Image Processing Thread (ws_process())
+static pthread_t tid_SocketConnect;		// Thread Id for thread responsible for connecting to the visionServer/RoboRio
 
 static bool InExtremCloseupMode 	= false;
 
@@ -108,22 +110,37 @@ static int offset 		= 0;
 static int thresholdX 	= 50;
 static double blurRadius= 5.0;
 
+static int	SetNum		= 0;
+static int	ImageNum	= 0;
+
 static int sockfd;
 
 static sem_t sem_SocketConnect;
+static sem_t sem_SaveImage;
+static sem_t sem_ImageSaved;
 static sem_t sem_ImageProcessed;
 static sem_t sem_ImageAvailableToProcess;
 
 static Mat SlaveProcessImage;	// Image passed between main thread and image processing thread.
+static Mat SlaveSaveImage;		// Image passed between main thread and SaveImageThread
 static bool FirstTime = true;
 static bool RunThread = true;
 static bool SocketConnected = false;
+static bool ImageRecording	= false;
+
+
+static char filename_log[] 		= "/home/pi/vision/test/PaulImages/%03d-Log.txt";
+static char filename_image[]	= "/home/pi/vision/test/PaulImages/%03d-Image-%04d.jpg";
+static FILE *fp_log				= NULL;
 
 // *******************************************
 // Local Prototypes
 // *******************************************
 static void* SocketConnectionThread(void *arg);
+static void* KeyboardControlThread(void *arg);
+static void* SaveImagesThread(void *arg);
 static void* SlaveImgProcessThread(void *arg);
+
 static void ws_process(Mat& img);
 static double TimeDiffInSec(timespec *start, timespec *stop);
 static void timespecDisplay(timespec *time);
@@ -160,6 +177,10 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 	// Create the semaphores for signalling that to the slave thread that there is work to be done and
 	// for the slave thread to signal when it has completed processing the image.
 	sem_init(&sem_SocketConnect, 0, 1); 			// set to initial value of 1 indicating that the Socket Connection Thread should attempt to connect 
+
+	sem_init(&sem_ImageSaved, 0, 1); 				// set to initial value of 1 indicating that the "image" is ready to the main thread.
+	sem_init(&sem_SaveImage,  0, 0); 				// set to initial value of 0 indicating that the "image" is not available to the slave thread
+
 	sem_init(&sem_ImageProcessed, 0, 1); 			// set to initial value of 1 indicating that the "image" is ready to the main thread.
 	sem_init(&sem_ImageAvailableToProcess, 0, 0); 	// set to initial value of 0 indicating that the "image" is not available to the slave thread
 
@@ -177,7 +198,23 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 	else
 		printf("\n SlaveImgProcessThread(): Thread created successfully\n");
 
+	err = pthread_create(&tid_SlaveSaveImage, NULL, &SaveImagesThread, NULL);
+	if (err != 0)
+		printf("\ncan't create thread SaveImagesThread() :[%s]", strerror(err));
+	else
+		printf("\n SaveImagesThread(): Thread created successfully\n");
+
 	clock_gettime(CLOCK_REALTIME, &tsPrev);
+
+
+	err = pthread_create(&tid_KeyboardControl, NULL, &KeyboardControlThread, NULL);
+	if (err != 0)
+		printf("\ncan't create thread KeyboardControlThread() :[%s]", strerror(err));
+	else
+		printf("\n KeyboardControlThread(): Thread created successfully\n");
+
+	clock_gettime(CLOCK_REALTIME, &tsPrev);
+
 
 
 	return true;
@@ -191,6 +228,7 @@ extern void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
 
 	// Wait for the slave thread to indicate that it has completed processing the previous image
 	sem_wait(&sem_ImageProcessed);
+	sem_wait(&sem_ImageSaved);
 
 	if (FirstTime == true) {
 		//
@@ -206,10 +244,13 @@ extern void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
 	}
 
 	// Copy the source image to the SlaveProcessImage so that the slave gets the updated image
-	SlaveProcessImage = src.clone();
+	SlaveProcessImage 	= src.clone();
+	SlaveSaveImage 		= src.clone();
 
 	// Tell the slave process that another image is available for it to process.
+	ImageNum++;
 	sem_post(&sem_ImageAvailableToProcess);
+	sem_post(&sem_SaveImage);
 }
 
 
@@ -372,6 +413,111 @@ static void* SocketConnectionThread(void *arg)
 	return NULL;
 }
 
+static void* SaveImagesThread(void *arg)
+{
+	bool		SiRunThread = true;
+	vector<int> compression_params;
+	char		buf[256];
+
+	// This is the slave thread which is responsible for the following:
+	// 
+	// 1. Wait for an image
+	// 2. Save the image to disk
+	// 4. Let the main thread know that it is ready to accept another image
+	// 
+
+	// Setup the JPEG image compression settings
+	compression_params.push_back(CV_IMWRITE_JPEG_QUALITY);
+	compression_params.push_back(100);
+
+	printf("%s(): Started\n", __FUNCTION__);
+
+	while (SiRunThread == true ) {
+
+		// Wait for the main thread to tell this thread that an image is available to be saved
+		sem_wait(&sem_SaveImage);
+
+		if (ImageRecording == true) {
+
+			sprintf(buf, filename_image, SetNum, ImageNum);
+
+			string filename = buf;
+
+			try {
+				imwrite( filename, SlaveSaveImage, compression_params);
+				printf("Image saved: %s\n", buf);
+			} 
+
+			catch ( runtime_error& ex ) {
+				fprintf(stderr, "Exception converting image to PNG format: %s\n", ex.what());
+			}
+		}
+
+
+		// Let the main thread know that the image has been processed
+		sem_post(&sem_ImageSaved);
+	}
+
+	return NULL;
+}
+
+static void* KeyboardControlThread(void *arg)
+{
+	bool		KcRunThread = true;
+
+	// This is the slave thread which is responsible for the following:
+	// 
+	// 1. Gets a keyboard press
+	// 2. Sets the parameters as necessary
+	// 
+
+	printf("%s(): Started\n", __FUNCTION__);
+
+	while (KcRunThread == true ) {
+        //int ch = std::cin.get();
+		char ch;
+
+		ch = getchar();
+
+		switch (ch) {
+		case 'b':
+		case 'B':
+			if (ImageRecording == false) {
+				char filename[256];
+
+				ImageNum = 0;
+
+				sprintf(filename, filename_log, SetNum);
+
+				fp_log = fopen(filename, "w");
+				if (fp_log == NULL) {
+					printf("ERROR: Unable to open file: %s\n", filename);
+					break;
+				}
+
+				ImageRecording = true;
+			}
+			break;
+
+		case 'e':
+		case 'E':
+			if (ImageRecording == true) {
+				ImageRecording = false;
+
+				SetNum++;
+				if (fp_log != NULL) {
+					fclose (fp_log);
+					fp_log = NULL;
+				}
+			}
+
+			break;
+		}
+	}
+
+	return NULL;
+}
+
 static void* SlaveImgProcessThread(void *arg)
 {
 	timespec 	tsStart;
@@ -381,6 +527,7 @@ static void* SlaveImgProcessThread(void *arg)
 	char		FalseStr[] 	= "False";
 	char		*ConnectedStr;
 	char		*InExtremeCloseupModeStr;
+	char		*ImageRecordingStr;
 
 	// This is the slave thread which is responsible for the following:
 	// 
@@ -420,12 +567,18 @@ static void* SlaveImgProcessThread(void *arg)
 		else
 			InExtremeCloseupModeStr = FalseStr;
 
-		printf("F2F=%5.4f S2E=%5.4f fps=%6.3f Connected=%s ExtremeCloseup=%s\n\n",
+		if (ImageRecording == true)
+			ImageRecordingStr = TrueStr;
+		else
+			ImageRecordingStr = FalseStr;
+
+		printf("F2F=%5.4f S2E=%5.4f fps=%6.3f Connected=%s ExtremeCloseup=%s ImageRecording=%s\n\n",
 			   Frame2FrameTimeInSec,
 			   TimeDiffInSec(&tsStart, &tsEnd),
 			   1./Frame2FrameTimeInSec, 
 			   ConnectedStr,
-			   InExtremeCloseupModeStr);
+			   InExtremeCloseupModeStr,
+			   ImageRecordingStr);
 		tsPrev = tsStart;
 
 		// Let the main thread know that the image has been processed
@@ -701,11 +854,14 @@ Exit:
 		sprintf(output, "%4.3f,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
 		//printf("%4.3f,%5.3f,%d,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3, weightingBound);
 		printf("xCorrectionLevel=%4.3f, DistanceFromWall=%5.3f\n", xCorrectionLevel, DistanceFromWall);
+		if ((ImageRecording == true)  && (fp_log != NULL)) {
+			fprintf(fp_log, "ImageNum=%04d xCorrectionLevel=%4.3f, DistanceFromWall=%5.3f\n", ImageNum, xCorrectionLevel, DistanceFromWall);
+		}
 		//cout<<"correction: "<<xCorrectionLevel<<endl;
 		//printf("%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
 #ifdef WS_USE_SOCKETS
 		int	ret;
-		printf("%s", output);
+		//printf("%s", output);
 		ret = send(sockfd, output, strlen(output)+1, 0);
 		if (ret < 0) {
 			SocketConnected = false;
