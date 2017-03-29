@@ -76,6 +76,7 @@ using namespace std;
 // *******************************************
 static timespec tsPrev;					// Previous Time
 static pthread_t tid_KeyboardControl;	// Thread Id for KeyboardControlThread()
+static pthread_t tid_SocketRead;		// Thread Id for SocketReadThread()
 static pthread_t tid_SlaveSaveImage;	// Thread Id for SaveImagesThread()
 static pthread_t tid_SlaveImgProc;		// Thread Id for processing Image Processing Thread (ws_process())
 static pthread_t tid_SocketConnect;		// Thread Id for thread responsible for connecting to the visionServer/RoboRio
@@ -116,6 +117,7 @@ static int	ImageNum	= 0;
 static int sockfd;
 
 static sem_t sem_SocketConnect;
+static sem_t sem_SocketRead;
 static sem_t sem_SaveImage;
 static sem_t sem_ImageSaved;
 static sem_t sem_ImageProcessed;
@@ -137,6 +139,7 @@ static FILE *fp_log				= NULL;
 // Local Prototypes
 // *******************************************
 static void* SocketConnectionThread(void *arg);
+static void* SocketReadThread(void *arg);
 static void* KeyboardControlThread(void *arg);
 static void* SaveImagesThread(void *arg);
 static void* SlaveImgProcessThread(void *arg);
@@ -154,6 +157,8 @@ static bool ExtremeCloseupModeGet(vector < vector<Point> > &contours);
 static void ThresholdExtremeCloseupSet(void);
 static void ThresholdFarSet(void);
 
+static void ImageRecordBegin(void);
+static void ImageRecordEnd(void);
 
 // exports for the filter
 extern "C" {
@@ -177,6 +182,7 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 	// Create the semaphores for signalling that to the slave thread that there is work to be done and
 	// for the slave thread to signal when it has completed processing the image.
 	sem_init(&sem_SocketConnect, 0, 1); 			// set to initial value of 1 indicating that the Socket Connection Thread should attempt to connect 
+	sem_init(&sem_SocketRead, 0, 0); 				// set to initial value of 0 indicating that the Socket Read Thread should wait until the Socket Connection Thread has connected
 
 	sem_init(&sem_ImageSaved, 0, 1); 				// set to initial value of 1 indicating that the "image" is ready to the main thread.
 	sem_init(&sem_SaveImage,  0, 0); 				// set to initial value of 0 indicating that the "image" is not available to the slave thread
@@ -191,6 +197,12 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 		printf("\ncan't create thread SocketConnectionThread() :[%s]", strerror(err));
 	else
 		printf("\n SocketConnectionThread(): Thread created successfully\n");
+
+	err = pthread_create(&tid_SocketRead, NULL, &SocketReadThread, NULL);
+	if (err != 0)
+		printf("\ncan't create thread SocketReadThread() :[%s]", strerror(err));
+	else
+		printf("\n SocketReadThread(): Thread created successfully\n");
 
 	err = pthread_create(&tid_SlaveImgProc, NULL, &SlaveImgProcessThread, NULL);
 	if (err != 0)
@@ -406,8 +418,54 @@ static void* SocketConnectionThread(void *arg)
 	
 		printf("Hmin = %d\nSmin = %d\nVmin = %d\nHmax = %d\nSmax = %d\nVmax = %d\nOffset = %d\nThreshold = %d\nBlur Radius = %f\n", m_H_MIN, m_S_MIN, m_V_MIN, m_H_MAX, m_S_MAX, m_V_MAX, offset, thresholdX, blurRadius);
 
+		// Let the SocketReadThread() know that it is safe to begin waiting for commands
+		sem_post(&sem_SocketRead);
+
 		SocketConnected = true;
 #endif
+	}
+
+	return NULL;
+}
+
+static void* SocketReadThread(void *arg)
+{
+	// This is the slave thread which is responsible for the following:
+	// 
+	// 1. Wait for an image
+	// 2. Process the image via ws_process()
+	// 3. Resize the image
+	// 4. Let the main thread know that the image is ready to be sent out to the SmartDashboard
+	// 
+	int 	n;
+	char 	ch;
+
+	printf("%s(): Started\n", __FUNCTION__);
+
+	// Wait for the main thread to tell this thread that an image is available to be processed
+	sem_wait(&sem_SocketRead);
+
+	while (RunThread == true ) {
+
+		n = recv(sockfd, &ch, 1, 0);
+		cout << "Received data" << endl;
+		if (n < 0)
+		{
+			ImageRecordEnd();
+			sem_wait(&sem_SocketRead);
+		}
+
+		switch (ch) {
+			case 'b':
+			case 'B':
+				ImageRecordBegin();
+				break;
+
+			case 'e':
+			case 'E':
+				ImageRecordEnd();
+				break;
+		}
 	}
 
 	return NULL;
@@ -445,7 +503,7 @@ static void* SaveImagesThread(void *arg)
 
 			try {
 				imwrite( filename, SlaveSaveImage, compression_params);
-				printf("Image saved: %s\n", buf);
+				//printf("Image saved: %s\n", buf);
 			} 
 
 			catch ( runtime_error& ex ) {
@@ -480,38 +538,15 @@ static void* KeyboardControlThread(void *arg)
 		ch = getchar();
 
 		switch (ch) {
-		case 'b':
-		case 'B':
-			if (ImageRecording == false) {
-				char filename[256];
-
-				ImageNum = 0;
-
-				sprintf(filename, filename_log, SetNum);
-
-				fp_log = fopen(filename, "w");
-				if (fp_log == NULL) {
-					printf("ERROR: Unable to open file: %s\n", filename);
-					break;
-				}
-
-				ImageRecording = true;
-			}
-			break;
-
-		case 'e':
-		case 'E':
-			if (ImageRecording == true) {
-				ImageRecording = false;
-
-				SetNum++;
-				if (fp_log != NULL) {
-					fclose (fp_log);
-					fp_log = NULL;
-				}
-			}
-
-			break;
+			case 'b':
+			case 'B':
+				ImageRecordBegin();
+				break;
+	
+			case 'e':
+			case 'E':
+				ImageRecordEnd();
+				break;
 		}
 	}
 
@@ -1401,4 +1436,34 @@ static void error(const char *msg)
 
 static bool wayToSort(int i, int j) { return i > j; }
 
+static void ImageRecordBegin(void)
+{
+	if (ImageRecording == false) {
+		char filename[256];
+
+		ImageNum = 0;
+
+		sprintf(filename, filename_log, SetNum);
+
+		fp_log = fopen(filename, "w");
+		if (fp_log == NULL) {
+			printf("ERROR: Unable to open file: %s\n", filename);
+		}
+
+		ImageRecording = true;
+	}
+}
+
+static void ImageRecordEnd(void)
+{
+	if (ImageRecording == true) {
+		ImageRecording = false;
+
+		SetNum++;
+		if (fp_log != NULL) {
+			fclose (fp_log);
+			fp_log = NULL;
+		}
+	}
+}
 
