@@ -111,8 +111,9 @@ static int offset 		= 0;
 static int thresholdX 	= 50;
 static double blurRadius= 5.0;
 
-static int	SetNum		= 0;
-static int	ImageNum	= 0;
+static int	SetNum				= 0;
+static int	ImageNum			= 0;
+static int	SnapshotImageNum	= 0;
 
 static int sockfd;
 
@@ -129,10 +130,11 @@ static bool FirstTime = true;
 static bool RunThread = true;
 static bool SocketConnected = false;
 static bool ImageRecording	= false;
+static bool SnapshotImage	= false;
 
-
-static char filename_log[] 		= "/home/pi/vision/test/PaulImages/%03d-Log.txt";
-static char filename_image[]	= "/home/pi/vision/test/PaulImages/%03d-Image-%04d.jpg";
+static char filename_log[] 		= "/home/pi/vision/test/ImageRec/%03d-Log.txt";
+static char filename_image[]	= "/home/pi/vision/test/ImageRec/%03d-Image-%04d.jpg";
+static char filename_snapshot[]	= "/home/pi/vision/test/ImageSnapshot/Snapshot-%04d.jpg";
 static FILE *fp_log				= NULL;
 
 // *******************************************
@@ -465,6 +467,11 @@ static void* SocketReadThread(void *arg)
 			case 'E':
 				ImageRecordEnd();
 				break;
+
+			case 's':
+			case 'S':
+				SnapshotImage = true;
+				break;
 		}
 	}
 
@@ -507,10 +514,28 @@ static void* SaveImagesThread(void *arg)
 			} 
 
 			catch ( runtime_error& ex ) {
-				fprintf(stderr, "Exception converting image to PNG format: %s\n", ex.what());
+				fprintf(stderr, "Exception converting image to JPEG format: %s\n", ex.what());
 			}
 		}
 
+		if (SnapshotImage == true) {
+			SnapshotImage = false;
+
+			sprintf(buf, filename_snapshot, SnapshotImageNum);
+
+			string filename = buf;
+
+			try {
+				imwrite( filename, SlaveSaveImage, compression_params);
+				printf("Image saved: %s\n", buf);
+			} 
+
+			catch ( runtime_error& ex ) {
+				fprintf(stderr, "Exception converting image to JPEG format: %s\n", ex.what());
+			}
+
+			SnapshotImageNum++;
+		}
 
 		// Let the main thread know that the image has been processed
 		sem_post(&sem_ImageSaved);
@@ -546,6 +571,11 @@ static void* KeyboardControlThread(void *arg)
 			case 'e':
 			case 'E':
 				ImageRecordEnd();
+				break;
+
+			case 's':
+			case 'S':
+				SnapshotImage = true;
 				break;
 		}
 	}
