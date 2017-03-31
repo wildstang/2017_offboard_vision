@@ -47,6 +47,8 @@ using namespace std;
 //#define DRAW_ALL_CONTOURS
 //#define IMAGE_FILE_OVERRIDE
 
+#define USE_BLUR								// Uncomment if we want to use the OpenCV Blur (which is slow
+
 #define WS_USE_SOCKETS
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.38"	// VisionTest on PC via WiFi
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.46"		// VisionTest on PC via direct connect
@@ -728,6 +730,7 @@ Continue:
 	//  Blur the image
 	// 
 
+#ifdef USE_BLUR
 	//blurRadius = 7.0;
 	Mat	blurInput = hsvMat;
 	Mat blurOutput;
@@ -735,12 +738,16 @@ Continue:
 	int kernelSize 		= 2*radius + 1;
 	blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
 	//GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
+#endif
 
 	// 
 	//  Convert img(BGR) -> hsvMat(HSV) color space
 	// 
-	//Mat	cnvInput = img;
+#ifdef USE_BLUR
 	Mat	cnvInput = blurOutput;
+#else // USE_BLUR
+	Mat	cnvInput = hsvMat;
+#endif // USE_BLUR
 	Mat	cnvOutput;
 	cvtColor(cnvInput, cnvOutput, COLOR_BGR2HSV);
 	// 
@@ -786,13 +793,6 @@ Continue:
 		// now find the ROIs that we are interested in
 		shouldContinue = ContourLocatorFarMode(contours, closest, secClose);
 	}
-	if(!shouldContinue){
-		ThresholdFarSet();
-		goto Exit;
-	}
-
-	cout<<"closest: "<<closest<<endl;
-	cout<<"secClose: "<<secClose<<endl;
 
 	if (SocketConnected != true) {
 		// Make a BIG X indicating that no communication with the RoboRIO is happening
@@ -801,6 +801,14 @@ Continue:
 		line(img, Point(0, img.rows), Point(img.cols, 0), Scalar(0,0,255), 2);
 		goto Exit;
 	}
+
+	if(!shouldContinue){
+		//ThresholdFarSet();
+		goto Exit;
+	}
+
+	cout<<"closest: "<<closest<<endl;
+	cout<<"secClose: "<<secClose<<endl;
 
 	//printf("closest=%d secClose=%d\n", closest, secClose);
 
