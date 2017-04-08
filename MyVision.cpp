@@ -46,20 +46,90 @@ using namespace std;
 //#define OVERRIDE_PARAMETER_FILE_READ
 //#define DRAW_ALL_CONTOURS
 //#define IMAGE_FILE_OVERRIDE
+//#define TRANSPOSE	// Rotate the image 90 deg
+
+//#define READ_IMAGE_FILES						// Uncomment if we want to read recorded images and process them 
+
+//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-PracticeField-Brokem-CheckLastRun/%03d-Image-%04d.jpg";
+//static int SetNum_Read		= 2;
+//static int ImageNumMin_Read	= 1;
+//static int ImageNumMax_Read	= 20;
+//static int ImageNum_Read	= ImageNumMin_Read - 1;	
+
+//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-01/%03d-Image-%04d.jpg";
+//static int SetNum_Read		= 0;
+//static int ImageNumMin_Read	= 2;
+//static int ImageNumMax_Read	= 45;
+//static int ImageNum_Read	= ImageNumMin_Read - 1;	
+
+//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-02/%03d-Image-%04d.jpg";
+//static int SetNum_Read		= 0;
+//static int ImageNumMin_Read	= 1;
+//static int ImageNumMax_Read	= 36;
+//static int ImageNum_Read	= ImageNumMin_Read - 1;	
+
+//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-03/%03d-Image-%04d.jpg";
+//static int SetNum_Read		= 0;
+//static int ImageNumMin_Read	= 2;
+//static int ImageNumMax_Read	= 27;
+//static int ImageNum_Read	= ImageNumMin_Read - 1;	
+
+//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-04/%03d-Image-%04d.jpg";
+//static int SetNum_Read		= 0;
+//static int ImageNumMin_Read	= 2;
+//static int ImageNumMax_Read	= 27;
+//static int ImageNum_Read	= ImageNumMin_Read - 1;	
+
+//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-05/%03d-Image-%04d.jpg";
+//static int SetNum_Read		= 0;
+//static int ImageNumMin_Read	= 1;
+//static int ImageNumMax_Read	= 27;
+//static int ImageNum_Read	= ImageNumMin_Read - 1;	
+
+//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-06/%03d-Image-%04d.jpg";
+//static int SetNum_Read		= 0;
+//static int ImageNumMin_Read	= 1;
+//static int ImageNumMax_Read	= 31;
+//static int ImageNum_Read	= ImageNumMin_Read - 1;	
+
+//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-07/%03d-Image-%04d.jpg";
+//static int SetNum_Read		= 1;
+//static int ImageNumMin_Read	= 1;
+//static int ImageNumMax_Read	= 31;
+//static int ImageNum_Read	= ImageNumMin_Read - 1;	
+
+//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-08/%03d-Image-%04d.jpg";
+//static int SetNum_Read		= 1;
+//static int ImageNumMin_Read	= 1;
+//static int ImageNumMax_Read	= 26;
+//static int ImageNum_Read	= ImageNumMin_Read - 1;	
+
+static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-09/%03d-Image-%04d.jpg";
+static int SetNum_Read		= 0;
+static int ImageNumMin_Read	= 1;
+static int ImageNumMax_Read	= 32;
+static int ImageNum_Read	= ImageNumMin_Read - 1;	
 
 #define USE_BLUR								// Uncomment if we want to use the OpenCV Blur (which is slow
 
 #define WS_USE_SOCKETS
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.38"	// VisionTest on PC via WiFi
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.46"		// VisionTest on PC via direct connect
-#define	ROBORIO_IP_ADDRESS	"10.1.11.2"		// Actual RoboRIO
+#define	ROBORIO_IP_ADDRESS	"10.1.11.222"		// Paul Test Setup
+//#define	ROBORIO_IP_ADDRESS	"10.1.11.2"		// Actual RoboRIO
 #define	ROBORIO_PORT_ADDRESS	5800			// Port Number on PC/RoboRIO
 
 #define	STRIP_HEIGHT		5.0	// Strip Height in Inches
 #define	STRIP_WIDTH			2.5	// Strip Width in Inches
 
+#ifdef TRANSPOSE
+#define IMAGE_HEIGHT_P		864 
+#define	IMAGE_WIDTH_P		480
+#else
 #define IMAGE_HEIGHT_P		480 
 #define	IMAGE_WIDTH_P		864
+#endif //TRANSPOSE
+
 #define	IMAGE_CENTERLINE_P	(IMAGE_WIDTH_P/2)
 
 // The calcluation for distance is as follows:
@@ -121,6 +191,7 @@ static int sockfd;
 
 static sem_t sem_SocketConnect;
 static sem_t sem_SocketRead;
+static sem_t sem_ReadImageFile;
 static sem_t sem_SaveImage;
 static sem_t sem_ImageSaved;
 static sem_t sem_ImageProcessed;
@@ -190,6 +261,8 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 
 	sem_init(&sem_ImageSaved, 0, 1); 				// set to initial value of 1 indicating that the "image" is ready to the main thread.
 	sem_init(&sem_SaveImage,  0, 0); 				// set to initial value of 0 indicating that the "image" is not available to the slave thread
+
+	sem_init(&sem_ReadImageFile, 0, 0); 			// set to initial value of 0 indicating that we are waiting for a keyboard forward or reverse
 
 	sem_init(&sem_ImageProcessed, 0, 1); 			// set to initial value of 1 indicating that the "image" is ready to the main thread.
 	sem_init(&sem_ImageAvailableToProcess, 0, 0); 	// set to initial value of 0 indicating that the "image" is not available to the slave thread
@@ -262,6 +335,11 @@ extern void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
 	// Copy the source image to the SlaveProcessImage so that the slave gets the updated image
 	SlaveProcessImage 	= src.clone();
 	SlaveSaveImage 		= src.clone();
+
+#ifdef TRANSPOSE
+	cv::transpose(SlaveProcessImage, SlaveProcessImage);
+#endif //TRANSPOSE
+
 
 	// Tell the slave process that another image is available for it to process.
 	ImageNum++;
@@ -579,6 +657,23 @@ static void* KeyboardControlThread(void *arg)
 			case 'S':
 				SnapshotImage = true;
 				break;
+
+			case 'f':
+			case 'F':
+				ImageNum_Read++;
+				if (ImageNum_Read > ImageNumMax_Read) {
+					ImageNum_Read = ImageNumMin_Read;
+				}
+				sem_post(&sem_ReadImageFile);
+				break;
+			case 'r':
+			case 'R':
+				ImageNum_Read--;
+				if (ImageNum_Read < ImageNumMin_Read) {
+					ImageNum_Read = ImageNumMax_Read;
+				}
+				sem_post(&sem_ReadImageFile);
+				break;
 		}
 	}
 
@@ -675,15 +770,33 @@ static void ws_process(Mat& img) {
 	double xCorrectionLevel = 0.0;
 	double DistanceFromWall = 0.0;
 
-	// hsvMat is a copy of the origianl image that we process an "blur". 
-	// We really don't want this image to be sent back to the SmartDashboard though
-	hsvMat = img.clone();
-
-
 #ifdef IMAGE_FILE_OVERRIDE
 	{
         Mat image;
 		string filename = "/home/pi/RobotImage.jpg";
+		image = imread( filename, IMREAD_COLOR );
+		if(image.empty())
+		{
+			std::cerr << "Cannot read image file: " << filename << std::endl;
+			std::cerr << "Using Image from camera" << std::endl;
+		}
+		else
+			img = image.clone();
+	}
+#endif //IMAGE_FILE_OVERRIDE
+
+#ifdef READ_IMAGE_FILES
+	{
+		char		buf[256];
+        Mat image;
+
+		printf("Waiting for 'f' or 'r' <enter>\n");
+		sem_wait(&sem_ReadImageFile);
+
+		sprintf(buf, filename_imageRead, SetNum_Read, ImageNum_Read);
+		printf("Reading file: %s\n", buf);
+
+		string filename = buf;
 		image = imread( filename, IMREAD_COLOR );
 		if(image.empty())
 		{
@@ -724,6 +837,10 @@ Continue:
 	printf("\n");
 #endif //OVERRIDE_PARAMETER_FILE_READ
 	
+	// hsvMat is a copy of the origianl image that we process an "blur". 
+	// We really don't want this image to be sent back to the SmartDashboard though
+	hsvMat = img.clone();
+
 	//printf("img.cols=%d img.rows=%d\n", img.cols, img.rows); 
 
 	// 
@@ -1125,6 +1242,7 @@ static bool ContourLocatorExtremeCloseupMode(vector < vector<Point> > &contours,
 				          abs(testRect_i.height - testRect_j.height) +
 				          //abs(testRect_i.x - testRect_j.x) +
 				          abs(testRect_i.width - testRect_j.width) +
+						  //abs(testRect_i.area() - testRect_j.area());
 						  abs(testRect_i.area() - testRect_i.area());
 			if (testMinDiff < MinDiff) {
 				closest = i;
@@ -1392,7 +1510,13 @@ static void ResizeImage(Mat &src, Mat &dst)
 {
 	Mat tmp;
 
+#ifdef TRANSPOSE
+	//tmp = src;
+	cv::resize(src, tmp, Size(166, 299));
+#else
 	cv::resize(src, tmp, Size(299, 166));
+#endif //TRANSPOSE
+
 	dst = tmp;
 }
 
