@@ -142,7 +142,6 @@ static timespec tsPrev;					// Previous Time
 static pthread_t tid_KeyboardControl;	// Thread Id for KeyboardControlThread()
 static pthread_t tid_SocketRead;		// Thread Id for SocketReadThread()
 static pthread_t tid_SlaveSaveImage;	// Thread Id for SaveImagesThread()
-static pthread_t tid_SlaveImgProc;		// Thread Id for processing Image Processing Thread (ws_process())
 static pthread_t tid_SocketConnect;		// Thread Id for thread responsible for connecting to the visionServer/RoboRio
 
 static bool InExtremCloseupMode 	= false;
@@ -186,7 +185,6 @@ static sem_t sem_SocketRead;
 static sem_t sem_ReadImageFile;
 static sem_t sem_SaveImage;
 static sem_t sem_ImageSaved;
-static sem_t sem_ImageProcessed;
 static sem_t sem_ImageAvailableToProcess;
 
 static Mat SlaveProcessImage;	// Image passed between main thread and image processing thread.
@@ -209,7 +207,7 @@ static void* SocketConnectionThread(void *arg);
 static void* SocketReadThread(void *arg);
 static void* KeyboardControlThread(void *arg);
 static void* SaveImagesThread(void *arg);
-static void* SlaveImgProcessThread(void *arg);
+static void* SlaveImgProcessThread(void);
 
 static void ws_process(Mat& img);
 static double TimeDiffInSec(timespec *start, timespec *stop);
@@ -256,9 +254,6 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 
 	sem_init(&sem_ReadImageFile, 0, 0); 			// set to initial value of 0 indicating that we are waiting for a keyboard forward or reverse
 
-	sem_init(&sem_ImageProcessed, 0, 1); 			// set to initial value of 1 indicating that the "image" is ready to the main thread.
-	sem_init(&sem_ImageAvailableToProcess, 0, 0); 	// set to initial value of 0 indicating that the "image" is not available to the slave thread
-
 	// Spawn off the worker thread
 	int err;
 	err = pthread_create(&tid_SocketConnect, NULL, &SocketConnectionThread, NULL);
@@ -272,12 +267,6 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 		printf("\ncan't create thread SocketReadThread() :[%s]", strerror(err));
 	else
 		printf("\n SocketReadThread(): Thread created successfully\n");
-
-	err = pthread_create(&tid_SlaveImgProc, NULL, &SlaveImgProcessThread, NULL);
-	if (err != 0)
-		printf("\ncan't create thread SlaveImgProcessThread() :[%s]", strerror(err));
-	else
-		printf("\n SlaveImgProcessThread(): Thread created successfully\n");
 
 	err = pthread_create(&tid_SlaveSaveImage, NULL, &SaveImagesThread, NULL);
 	if (err != 0)
@@ -297,7 +286,6 @@ extern bool filter_init(const char * args, void** filter_ctx) {
 	clock_gettime(CLOCK_REALTIME, &tsPrev);
 
 
-
 	return true;
 }
 
@@ -307,31 +295,53 @@ extern void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
 	// This function MUST exist even if it does nothing.
 
 
-	// Wait for the slave thread to indicate that it has completed processing the previous image
-	sem_wait(&sem_ImageProcessed);
-	sem_wait(&sem_ImageSaved);
+	//replaced thread with equal proccesses
+	SlaveImgProcessThread();
+	dst = SlaveProcessImage.clone();
+}
 
-	if (FirstTime == true) {
-		//
-		// This first time through, there is no image to return so just resize the original image
-		// to the same size that the other images will be and send that back.
-		ResizeImage(src, dst);
-		dst = src;
-		FirstTime = false;
-	}
-	else {
-		// OK, the slave thread has completed processing the image so copy to the destination
-		dst = SlaveProcessImage.clone();
-	}
+static void* SlaveImgProcessThread(void)
+{
+	timespec 	tsStart;
+	timespec 	tsEnd;
+	double 		Frame2FrameTimeInSec = 0.0;
+	char		TrueStr[] 	= "True";
+	char		FalseStr[] 	= "False";
+	char		*ConnectedStr;
+	char		*InExtremeCloseupModeStr;
+	
+	printf("%s(): Started\n", __FUNCTION__);
+		clock_gettime(CLOCK_REALTIME, &tsStart);
 
-	// Copy the source image to the SlaveProcessImage so that the slave gets the updated image
-	SlaveProcessImage 	= src.clone();
-	SlaveSaveImage 		= src.clone();
+		// Process the image
+		ws_process(SlaveProcessImage);
 
-	// Tell the slave process that another image is available for it to process.
-	ImageNum++;
-	sem_post(&sem_ImageAvailableToProcess);
-	sem_post(&sem_SaveImage);
+		// Resize since the image here so it is done by the slave process thread
+		ResizeImage(SlaveProcessImage, SlaveProcessImage);
+
+		clock_gettime(CLOCK_REALTIME, &tsEnd);
+
+		// Display the image processing time and frame rate
+		Frame2FrameTimeInSec = TimeDiffInSec(&tsPrev, &tsStart);
+
+		if (SocketConnected == true)
+			ConnectedStr = TrueStr;
+		else
+			ConnectedStr = FalseStr;
+
+		if (InExtremCloseupMode == true)
+			InExtremeCloseupModeStr = TrueStr;
+		else
+			InExtremeCloseupModeStr = FalseStr;
+
+		printf("F2F=%5.4f S2E=%5.4f fps=%6.3f Connected=%s ExtremeCloseup=%s\n\n",
+			   Frame2FrameTimeInSec,
+			   TimeDiffInSec(&tsStart, &tsEnd),
+			   1./Frame2FrameTimeInSec, 
+			   ConnectedStr,
+			   InExtremeCloseupModeStr);
+		tsPrev = tsStart;
+	return NULL;
 }
 
 
@@ -379,18 +389,14 @@ static void* SocketConnectionThread(void *arg)
 		printf("CV_MAJOR_VERSION=%d CV_MINOR_VERSION=%d\n", CV_MAJOR_VERSION, CV_MINOR_VERSION);
 		
 		portno = ROBORIO_PORT_ADDRESS;
-		cout << "Opening socket" << endl;
 		sockfd = socket(AF_INET, SOCK_STREAM, 0);
 		if (sockfd < 0)
 		{
-			cout << "Could not open socket" << endl;
 			error("ERROR opening socket");
 		}
 	
-		cout << "Getting host name" << endl;
 		server = gethostbyname(ROBORIO_IP_ADDRESS);
 		if (server == NULL) {
-			cout << "ERROR, no such host" << endl;
 			exit(0);
 		}
 	
@@ -621,6 +627,7 @@ static void* KeyboardControlThread(void *arg)
 	// 2. Sets the parameters as necessary
 	// 
 
+
 	printf("%s(): Started\n", __FUNCTION__);
 
 	while (KcRunThread == true ) {
@@ -667,81 +674,10 @@ static void* KeyboardControlThread(void *arg)
 	return NULL;
 }
 
-static void* SlaveImgProcessThread(void *arg)
-{
-	timespec 	tsStart;
-	timespec 	tsEnd;
-	double 		Frame2FrameTimeInSec = 0.0;
-	char		TrueStr[] 	= "True";
-	char		FalseStr[] 	= "False";
-	char		*ConnectedStr;
-	char		*InExtremeCloseupModeStr;
-	char		*ImageRecordingStr;
-
-	// This is the slave thread which is responsible for the following:
-	// 
-	// 1. Wait for an image
-	// 2. Process the image via ws_process()
-	// 3. Resize the image
-	// 4. Let the main thread know that the image is ready to be sent out to the SmartDashboard
-	// 
-
-	printf("%s(): Started\n", __FUNCTION__);
-
-	while (RunThread == true ) {
-
-		// Wait for the main thread to tell this thread that an image is available to be processed
-		sem_wait(&sem_ImageAvailableToProcess);
-
-		clock_gettime(CLOCK_REALTIME, &tsStart);
-
-		// Process the image
-		ws_process(SlaveProcessImage);
-
-		// Resize since the image here so it is done by the slave process thread
-		ResizeImage(SlaveProcessImage, SlaveProcessImage);
-
-		clock_gettime(CLOCK_REALTIME, &tsEnd);
-
-		// Display the image processing time and frame rate
-		Frame2FrameTimeInSec = TimeDiffInSec(&tsPrev, &tsStart);
-
-		if (SocketConnected == true)
-			ConnectedStr = TrueStr;
-		else
-			ConnectedStr = FalseStr;
-
-		if (InExtremCloseupMode == true)
-			InExtremeCloseupModeStr = TrueStr;
-		else
-			InExtremeCloseupModeStr = FalseStr;
-
-		if (ImageRecording == true)
-			ImageRecordingStr = TrueStr;
-		else
-			ImageRecordingStr = FalseStr;
-
-		printf("F2F=%5.4f S2E=%5.4f fps=%6.3f Connected=%s ExtremeCloseup=%s ImageRecording=%s\n\n",
-			   Frame2FrameTimeInSec,
-			   TimeDiffInSec(&tsStart, &tsEnd),
-			   1./Frame2FrameTimeInSec, 
-			   ConnectedStr,
-			   InExtremeCloseupModeStr,
-			   ImageRecordingStr);
-		tsPrev = tsStart;
-
-		// Let the main thread know that the image has been processed
-		sem_post(&sem_ImageProcessed);
-	}
-
-	return NULL;
-}
-
 static void ws_process(Mat& img) {
 	// The ws_process is responsible for processing the image and sending heading and distance information
 	// back to the RoboRIO. This is done as a separate thread in parallel to the main thread which is collecting the
 	// image frame from the camera and sending the output from to the RoboRIO.
-	
 	Mat hsvMat(img.size(), img.type());
 	Mat hsvOut;
 	
@@ -769,7 +705,7 @@ static void ws_process(Mat& img) {
 		printf("Reading file: %s\n", buf);
 
 		string filename = buf;
-		image = imread( filename, IMREAD_COLOR );
+		image = imread(filename, IMREAD_COLOR );
 		if(image.empty())
 		{
 			std::cerr << "Cannot read image file: " << filename << std::endl;
@@ -1004,7 +940,6 @@ Exit:
 		}
 #endif	//WS_USE_SOCKETS
 	}
-
 	return;
 }
 
