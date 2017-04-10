@@ -45,8 +45,7 @@ using namespace std;
 //#define TRACE				// adds additional printf debug information
 //#define OVERRIDE_PARAMETER_FILE_READ
 //#define DRAW_ALL_CONTOURS
-//#define IMAGE_FILE_OVERRIDE
-//#define TRANSPOSE	// Rotate the image 90 deg
+//#define HIGH_CAMERA		// Uncomment if camera is in the high position
 
 //#define READ_IMAGE_FILES						// Uncomment if we want to read recorded images and process them 
 
@@ -62,11 +61,11 @@ using namespace std;
 //static int ImageNumMax_Read	= 45;
 //static int ImageNum_Read	= ImageNumMin_Read - 1;	
 
-//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-02/%03d-Image-%04d.jpg";
-//static int SetNum_Read		= 0;
-//static int ImageNumMin_Read	= 1;
-//static int ImageNumMax_Read	= 36;
-//static int ImageNum_Read	= ImageNumMin_Read - 1;	
+static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-02/%03d-Image-%04d.jpg";
+static int SetNum_Read		= 0;
+static int ImageNumMin_Read	= 1;
+static int ImageNumMax_Read	= 36;
+static int ImageNum_Read	= ImageNumMin_Read - 1;	
 
 //static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-03/%03d-Image-%04d.jpg";
 //static int SetNum_Read		= 0;
@@ -104,31 +103,26 @@ using namespace std;
 //static int ImageNumMax_Read	= 26;
 //static int ImageNum_Read	= ImageNumMin_Read - 1;	
 
-static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-09/%03d-Image-%04d.jpg";
-static int SetNum_Read		= 0;
-static int ImageNumMin_Read	= 1;
-static int ImageNumMax_Read	= 32;
-static int ImageNum_Read	= ImageNumMin_Read - 1;	
+//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-09/%03d-Image-%04d.jpg";
+//static int SetNum_Read		= 0;
+//static int ImageNumMin_Read	= 1;
+//static int ImageNumMax_Read	= 32;
+//static int ImageNum_Read	= ImageNumMin_Read - 1;	
 
 #define USE_BLUR								// Uncomment if we want to use the OpenCV Blur (which is slow
 
 #define WS_USE_SOCKETS
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.38"	// VisionTest on PC via WiFi
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.46"		// VisionTest on PC via direct connect
-#define	ROBORIO_IP_ADDRESS	"10.1.11.222"		// Paul Test Setup
-//#define	ROBORIO_IP_ADDRESS	"10.1.11.2"		// Actual RoboRIO
+//#define	ROBORIO_IP_ADDRESS	"10.1.11.222"		// Paul Test Setup
+#define	ROBORIO_IP_ADDRESS	"10.1.11.2"		// Actual RoboRIO
 #define	ROBORIO_PORT_ADDRESS	5800			// Port Number on PC/RoboRIO
 
 #define	STRIP_HEIGHT		5.0	// Strip Height in Inches
 #define	STRIP_WIDTH			2.5	// Strip Width in Inches
 
-#ifdef TRANSPOSE
-#define IMAGE_HEIGHT_P		864 
-#define	IMAGE_WIDTH_P		480
-#else
 #define IMAGE_HEIGHT_P		480 
 #define	IMAGE_WIDTH_P		864
-#endif //TRANSPOSE
 
 #define	IMAGE_CENTERLINE_P	(IMAGE_WIDTH_P/2)
 
@@ -136,8 +130,13 @@ static int ImageNum_Read	= ImageNumMin_Read - 1;
 //
 // distance = f(pixels) = DISTANCE_A + DISTANCE_B/pixels
 // 
+#ifdef HIGH_CAMERA
+#define DISTANCE_A			-3
+#define DISTANCE_B			3917.36
+#else // Camera at low position
 #define DISTANCE_A			-2.03785849
 #define DISTANCE_B			4363.144182
+#endif //HIGH_CAMERA
 
 // *******************************************
 // Local Structures
@@ -335,11 +334,6 @@ extern void filter_process(void* filter_ctx, Mat &src, Mat &dst) {
 	// Copy the source image to the SlaveProcessImage so that the slave gets the updated image
 	SlaveProcessImage 	= src.clone();
 	SlaveSaveImage 		= src.clone();
-
-#ifdef TRANSPOSE
-	cv::transpose(SlaveProcessImage, SlaveProcessImage);
-#endif //TRANSPOSE
-
 
 	// Tell the slave process that another image is available for it to process.
 	ImageNum++;
@@ -770,21 +764,6 @@ static void ws_process(Mat& img) {
 	double xCorrectionLevel = 0.0;
 	double DistanceFromWall = 0.0;
 
-#ifdef IMAGE_FILE_OVERRIDE
-	{
-        Mat image;
-		string filename = "/home/pi/RobotImage.jpg";
-		image = imread( filename, IMREAD_COLOR );
-		if(image.empty())
-		{
-			std::cerr << "Cannot read image file: " << filename << std::endl;
-			std::cerr << "Using Image from camera" << std::endl;
-		}
-		else
-			img = image.clone();
-	}
-#endif //IMAGE_FILE_OVERRIDE
-
 #ifdef READ_IMAGE_FILES
 	{
 		char		buf[256];
@@ -806,7 +785,7 @@ static void ws_process(Mat& img) {
 		else
 			img = image.clone();
 	}
-#endif //IMAGE_FILE_OVERRIDE
+#endif //READ_IMAGE_FILES
 
 #ifdef OVERRIDE_PARAMETER_FILE_READ
 	{
@@ -979,7 +958,8 @@ Continue:
 		int	iNumPixels 	= distanceBetweenRects;
 
 		// Put a line on the "calculated" center
-		line(img, Point(avgX, 0), Point(avgX, IMAGE_HEIGHT_P), Scalar(0, 0, 0), 3);
+		line(img, Point(avgX, 0), Point(avgX, IMAGE_HEIGHT_P), Scalar(0, 255, 255), 3);
+		//line(img, Point(avgX, 0), Point(avgX, IMAGE_HEIGHT_P), Scalar(0, 0, 0), 3);
 		
 		// Put lines on diagonals of rectangles	
 		line(img, Point(oneRect.x, oneRect.y), Point(oneRect.x + oneRect.width, oneRect.y + oneRect.height), Scalar(0, 0, 0), 2);
@@ -1510,12 +1490,7 @@ static void ResizeImage(Mat &src, Mat &dst)
 {
 	Mat tmp;
 
-#ifdef TRANSPOSE
-	//tmp = src;
-	cv::resize(src, tmp, Size(166, 299));
-#else
 	cv::resize(src, tmp, Size(299, 166));
-#endif //TRANSPOSE
 
 	dst = tmp;
 }
