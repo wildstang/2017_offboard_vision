@@ -105,7 +105,7 @@ static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-09/%0
 static int SetNum_Read		= 0;
 static int ImageNumMin_Read	= 1;
 static int ImageNumMax_Read	= 32;
-static int ImageNum_Read	= ImageNumMin_Read;	
+static int ImageNum_Read	= ImageNumMin_Read - 1;	
 
 #define USE_BLUR								// Uncomment if we want to use the OpenCV Blur (which is slow
 
@@ -658,7 +658,7 @@ static void* KeyboardControlThread(void *arg)
 				if (ImageNum_Read > ImageNumMax_Read) {
 					ImageNum_Read = ImageNumMin_Read;
 				}
-				//sem_post(&sem_ReadImageFile);
+				sem_post(&sem_ReadImageFile);
 				break;
 			case 'r':
 			case 'R':
@@ -666,7 +666,7 @@ static void* KeyboardControlThread(void *arg)
 				if (ImageNum_Read < ImageNumMin_Read) {
 					ImageNum_Read = ImageNumMax_Read;
 				}
-				//sem_post(&sem_ReadImageFile);
+				sem_post(&sem_ReadImageFile);
 				break;
 		}
 	}
@@ -699,7 +699,7 @@ static void ws_process(Mat& img) {
         Mat image;
 
 		printf("Waiting for 'f' or 'r' <enter>\n");
-		//sem_wait(&sem_ReadImageFile)
+		sem_wait(&sem_ReadImageFile);
 
 		sprintf(buf, filename_imageRead, SetNum_Read, ImageNum_Read);
 		printf("Reading file: %s\n", buf);
@@ -910,6 +910,7 @@ static void ws_process(Mat& img) {
 	else {
 		printf("Why did we get here? oneRect.area()=%d theOtherRect.area()=%d\n", oneRect.area(), theOtherRect.area());
 	}
+	
 
 Exit:
 	if (SocketConnected == true) {
