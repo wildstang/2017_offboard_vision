@@ -46,6 +46,7 @@ using namespace std;
 //#define OVERRIDE_PARAMETER_FILE_READ
 //#define DRAW_ALL_CONTOURS
 //#define HIGH_CAMERA		// Uncomment if camera is in the high position
+//#define MEASURE_TIME		// Uncomment if we want to measure the time for the various processing steps
 
 //#define READ_IMAGE_FILES						// Uncomment if we want to read recorded images and process them 
 
@@ -109,7 +110,7 @@ static int ImageNum_Read	= ImageNumMin_Read - 1;
 //static int ImageNumMax_Read	= 32;
 //static int ImageNum_Read	= ImageNumMin_Read - 1;	
 
-#define USE_BLUR								// Uncomment if we want to use the OpenCV Blur (which is slow
+//#define USE_BLUR								// Uncomment if we want to use the OpenCV Blur (which is slow
 
 #define WS_USE_SOCKETS
 //#define	ROBORIO_IP_ADDRESS	"10.1.11.38"	// VisionTest on PC via WiFi
@@ -764,6 +765,36 @@ static void ws_process(Mat& img) {
 	double xCorrectionLevel = 0.0;
 	double DistanceFromWall = 0.0;
 
+#ifdef MEASURE_TIME
+	timespec 	ltsStart;
+	timespec 	ltsEnd;
+	double 		TotalProcessTimeInSec = 0.0;
+
+	timespec 	ltsBlurStart;
+	timespec 	ltsBlurEnd;
+	double 		BlurProcessTimeInSec = 0.0;
+
+	timespec 	ltsImgConvertStart;
+	timespec 	ltsImgConvertEnd;
+	double 		ImgConvertProcessTimeInSec = 0.0;
+
+	timespec 	ltsInRangeStart;
+	timespec 	ltsInRangeEnd;
+	double 		InRangeProcessTimeInSec = 0.0;
+
+	timespec 	ltsFindContoursStart;
+	timespec 	ltsFindContoursEnd;
+	double 		FindContoursProcessTimeInSec = 0.0;
+
+	timespec 	ltsFindRectangleStart;
+	timespec 	ltsFindRectangleEnd;
+	double 		FindRectanglesProcessTimeInSec = 0.0;
+
+	timespec 	ltsProcessRectangleStart;
+	timespec 	ltsProcessRectangleEnd;
+	double 		ProcessRectanglesProcessTimeInSec = 0.0;
+#endif //MEASURE_TIME
+
 #ifdef READ_IMAGE_FILES
 	{
 		char		buf[256];
@@ -816,6 +847,10 @@ Continue:
 	printf("\n");
 #endif //OVERRIDE_PARAMETER_FILE_READ
 	
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsStart);
+#endif //MEASURE_TIME
+
 	// hsvMat is a copy of the origianl image that we process an "blur". 
 	// We really don't want this image to be sent back to the SmartDashboard though
 	hsvMat = img.clone();
@@ -825,6 +860,9 @@ Continue:
 	// 
 	//  Blur the image
 	// 
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsBlurStart);
+#endif //MEASURE_TIME
 
 #ifdef USE_BLUR
 	//blurRadius = 7.0;
@@ -835,10 +873,16 @@ Continue:
 	blur(blurInput, blurOutput, Size(kernelSize, kernelSize));
 	//GaussianBlur(hsvOut, blurMat, Size(0, 0), 3.0);
 #endif
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsBlurEnd);
+#endif //MEASURE_TIME
 
 	// 
 	//  Convert img(BGR) -> hsvMat(HSV) color space
 	// 
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsImgConvertStart);
+#endif //MEASURE_TIME
 #ifdef USE_BLUR
 	Mat	cnvInput = blurOutput;
 #else // USE_BLUR
@@ -846,9 +890,16 @@ Continue:
 #endif // USE_BLUR
 	Mat	cnvOutput;
 	cvtColor(cnvInput, cnvOutput, COLOR_BGR2HSV);
+
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsImgConvertEnd);
+#endif //MEASURE_TIME
 	// 
 	// Find the pixels that are within the the specified range and place into hsvOut
 	// 
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsInRangeStart);
+#endif //MEASURE_TIME
 	Mat	inRangeInput = cnvOutput;
 	Mat inRangeOutput;
 	//inRange(hsvMat, Scalar(0, 48, 0), Scalar(100, 180, 246), hsvOut);	// Poppe Basement
@@ -856,7 +907,11 @@ Continue:
 	//inRange(hsvMat, Scalar(142, 0, 225), Scalar(180, 255, 255), hsvOut);	// Gym with Light TBD
 	//inRange(inRangeInput, Scalar(81, 0, 238), Scalar(180, 255, 255), inRangeOutput);	// Poppe Basement with Light
 	inRange (inRangeInput, Scalar(m_H_MIN, m_S_MIN, m_V_MIN), Scalar(m_H_MAX, m_S_MAX, m_V_MAX), inRangeOutput);
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsInRangeEnd);
 
+	clock_gettime(CLOCK_REALTIME, &ltsFindContoursStart);
+#endif //MEASURE_TIME
 	// 
 	// find the contours
 	// 
@@ -867,12 +922,18 @@ Continue:
 #ifdef DRAW_ALL_CONTOURS
 	drawContours(img, contours, -1, (255,255,255), 3);
 #endif //DRAW_ALL_CONTOURS
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsFindContoursEnd);
+#endif //MEASURE_TIME
 
 	// find the "best" 2 rectangles that match what what we are looking for
 	int closest = 0;
 	int secClose = 0;
 	bool shouldContinue 		= false;
 
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsFindRectangleStart);
+#endif //MEASURE_TIME
 	InExtremCloseupMode = ExtremeCloseupModeGet(contours);
 
 	if (InExtremCloseupMode == true) {
@@ -889,6 +950,9 @@ Continue:
 		// now find the ROIs that we are interested in
 		shouldContinue = ContourLocatorFarMode(contours, closest, secClose);
 	}
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsFindRectangleEnd);
+#endif //MEASURE_TIME
 
 	if (SocketConnected != true) {
 		// Make a BIG X indicating that no communication with the RoboRIO is happening
@@ -903,10 +967,14 @@ Continue:
 		goto Exit;
 	}
 
-	cout<<"closest: "<<closest<<endl;
-	cout<<"secClose: "<<secClose<<endl;
+	//cout<<"closest: "<<closest<<endl;
+	//cout<<"secClose: "<<secClose<<endl;
 
 	//printf("closest=%d secClose=%d\n", closest, secClose);
+
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsProcessRectangleStart);
+#endif //MEASURE_TIME
 
 	// Get the rectangles that represent the regions of intrest
 	oneRect 		= boundingRect(contours.at(closest));
@@ -1011,8 +1079,33 @@ Continue:
 	else {
 		printf("Why did we get here? oneRect.area()=%d theOtherRect.area()=%d\n", oneRect.area(), theOtherRect.area());
 	}
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsProcessRectangleEnd);
+#endif //MEASURE_TIME
 
 Exit:
+
+#ifdef MEASURE_TIME
+	clock_gettime(CLOCK_REALTIME, &ltsEnd);
+	TotalProcessTimeInSec 		      = TimeDiffInSec(&ltsStart, &ltsEnd);
+	BlurProcessTimeInSec  		      = TimeDiffInSec(&ltsBlurStart, &ltsBlurEnd);
+	ImgConvertProcessTimeInSec	      = TimeDiffInSec(&ltsImgConvertStart, &ltsImgConvertEnd);
+	InRangeProcessTimeInSec		      = TimeDiffInSec(&ltsInRangeStart, &ltsInRangeEnd);
+	FindContoursProcessTimeInSec      = TimeDiffInSec(&ltsFindContoursStart, &ltsFindContoursEnd);
+	FindRectanglesProcessTimeInSec    = TimeDiffInSec(&ltsFindRectangleStart, &ltsFindRectangleEnd);
+	ProcessRectanglesProcessTimeInSec = TimeDiffInSec(&ltsProcessRectangleStart, &ltsProcessRectangleEnd);
+
+	printf("---------------------------------------\n");
+	printf("BlurProcessTimeInSec              = %4.3f\n", BlurProcessTimeInSec);
+	printf("ImgConvertProcessTimeInSec        = %4.3f\n", ImgConvertProcessTimeInSec);
+	printf("InRangeProcessTimeInSec           = %4.3f\n", InRangeProcessTimeInSec);
+	printf("FindContoursProcessTimeInSec      = %4.3f\n", FindContoursProcessTimeInSec);
+	printf("FindRectanglesProcessTimeInSec    = %4.3f\n", FindRectanglesProcessTimeInSec);
+	printf("ProcessRectanglesProcessTimeInSec = %4.3f\n", ProcessRectanglesProcessTimeInSec);
+	printf("TotalProcessTimeInSec             = %4.3f\n", TotalProcessTimeInSec);
+	printf("---------------------------------------\n");
+#endif //MEASURE_TIME
+
 	if (SocketConnected == true) {
 		//
 		// Send back any values to the RoboRIO
