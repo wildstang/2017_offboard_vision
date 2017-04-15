@@ -97,20 +97,24 @@ static char HomeDir[] 			= "/home/pi/vision/test/";
 static char ImageNameFormat[]	= "%03d-Image-%04d.jpg";
 
 static FILE_SET_ENTRY FileSetList[] = {
-	// Directory,				SetNum,	ImageNumMin,	ImageNumMax,	
-	{ "",						0,		0,				0,				},	// 0
-	{ "ImageRec-UIC-Match-01",	0,		2,				45,				},	// 1
-	{ "ImageRec-UIC-Match-02",	0,		1,				36,				},	// 2
-	{ "ImageRec-UIC-Match-03",	0,		2,				27,				},	// 3
-	{ "ImageRec-UIC-Match-04",	0,		2,				27,				},	// 4
-	{ "ImageRec-UIC-Match-05",	0,		1,				27,				},	// 5
-	{ "ImageRec-UIC-Match-06",	0,		1,				31,				},	// 6
-	{ "ImageRec-UIC-Match-07",	1,		1,				31,				},	// 7
-	{ "ImageRec-UIC-Match-08",	1,		1,				26,				},	// 8
-	{ "ImageRec-UIC-Match-09",	0,		1,				32,				},	// 9
+	// Directory,									SetNum,	ImageNumMin,	ImageNumMax,	
+	{ "",											0,		0,				0,				},	// 0
+	{ "ImageRec-UIC-Match-01",						0,		2,				45,				},	// 1
+	{ "ImageRec-UIC-Match-02",						0,		1,				36,				},	// 2
+	{ "ImageRec-UIC-Match-03",						0,		2,				27,				},	// 3
+	{ "ImageRec-UIC-Match-04",						0,		2,				27,				},	// 4
+	{ "ImageRec-UIC-Match-05",						0,		1,				27,				},	// 5
+	{ "ImageRec-UIC-Match-06",						0,  	1,				31,				},	// 6
+	{ "ImageRec-UIC-Match-07(Hit Hard-Lost Comms)",	0,		1,				26,				},	// 7
+	{ "ImageRec-UIC-Match-08",						1,  	1,				26,				},	// 8
+	{ "ImageRec-UIC-Match-09",						0,  	1,				32,				},	// 9
+	{ "ImageRec-2017-04-11_broken",					0,  	1,				29,				},	// 10
+	{ "ImageRec-2017-04-11_broken",					1,  	1,				29,				},	// 11
+	{ "ImageRec-2017-04-11_broken",					2,  	1,				37,				},	// 12
+	{ "ImageRec-2017-04-11_broken",					4,  	1,				25,				},	// 13
 };
 
-#define PLAYBACK_MATCH	2	// Selected from FileSetList[] above
+#define PLAYBACK_MATCH	13	// Selected from FileSetList[] above
 
 static char *FileSetName	= FileSetList[PLAYBACK_MATCH].Directory;
 static int SetNum_Read		= FileSetList[PLAYBACK_MATCH].SetNum;
@@ -969,7 +973,7 @@ Continue:
 	//cout<<"closest: "<<closest<<endl;
 	//cout<<"secClose: "<<secClose<<endl;
 
-	//printf("closest=%d secClose=%d\n", closest, secClose);
+	printf("closest=%d secClose=%d\n", closest, secClose);
 
 #ifdef MEASURE_TIME
 	clock_gettime(CLOCK_REALTIME, &ltsProcessRectangleStart);
@@ -1167,9 +1171,9 @@ static bool ContourLocatorExtremeCloseupMode(vector < vector<Point> > &contours,
 			similarity[i] = 10.;
 			UsableContour[i] = false;
 		}
-		else if (currentSize.area() < 15000) {
+		else if ((currentSize.area() < 7000) || (currentSize.area() > 50000)) {
 			// this is reflection of some form so ignore
-			similarity[i] = 10.;
+			similarity[i] = 15.;
 			UsableContour[i] = false;
 		}
 		else if (abs(rectangleCenterLine-ImageCenterLine) < 50) {
@@ -1180,11 +1184,11 @@ static bool ContourLocatorExtremeCloseupMode(vector < vector<Point> > &contours,
 				   rectangleCenterLine, ImageCenterLine);
 #endif //TRACE
 
-			similarity[i] = 10.;
+			similarity[i] = 20.;
 			UsableContour[i] = false;
+			//printf("i=%d UsableContour[i%d] = false\n", i, i);
 		}
-		else
-		{
+		else {
 			// *************************************************************************************************
 			// The similarity is calculated as follows:
 			// 
@@ -1200,7 +1204,14 @@ static bool ContourLocatorExtremeCloseupMode(vector < vector<Point> > &contours,
 			// The closer this is to 0 the better the chance that we found the object that we are looking for!!!
 			// *************************************************************************************************
 			similarity[i] = fabs(1.0-((MeasuredHeight / MeasuredWidth)* STRIP_WIDTH/STRIP_HEIGHT));
-			UsableContour[i] = true;
+			//UsableContour[i] = true;
+
+			if (similarity[i] < 1.) {
+				UsableContour[i] = true;
+			}
+			else {
+				UsableContour[i] = false;
+			}
  //   		if (similarity[i] > fabs(1.0- STRIP_WIDTH/STRIP_HEIGHT)) {
  //   			UsableContour[i] = false;
  //   		}
@@ -1223,14 +1234,18 @@ static bool ContourLocatorExtremeCloseupMode(vector < vector<Point> > &contours,
 		int	usable=-1;
 
 		if (UsableContour[i])
+		{
 			usable = 1;
+		}
 		else
+		{
 			usable = 0;
+		}
 
 		testRect 	= boundingRect(contours.at(i));
 		//if (UsableContour[i] == true) 
 		{
-			printf("BS similarity[i=%2d]=%6.3f Usable=%d x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
+			printf("BSE similarity[i=%2d]=%6.3f Usable=%d x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
 				   i, similarity[i], usable, testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
 		}
 	}
@@ -1365,7 +1380,7 @@ static bool ContourLocatorFarMode(vector < vector<Point> > &contours, int &close
 
 		if (((MeasuredHeight < 25) || (MeasuredWidth < 10)) /*|| 
 			(MeasuredHeight > 500) || (MeasuredWidth > 700) */) {
-			similarity[i] = 10.;
+			similarity[i] = 50.;
 			UsableContour[i] = false;
 		}
 		else
@@ -1385,13 +1400,14 @@ static bool ContourLocatorFarMode(vector < vector<Point> > &contours, int &close
 			// The closer this is to 0 the better the chance that we found the object that we are looking for!!!
 			// *************************************************************************************************
 			similarity[i] = fabs(1.0-((MeasuredHeight / MeasuredWidth)* STRIP_WIDTH/STRIP_HEIGHT));
-			UsableContour[i] = true;
- //   		if (similarity[i] > fabs(1.0- STRIP_WIDTH/STRIP_HEIGHT)) {
- //   			UsableContour[i] = false;
- //   		}
- //   		else {
- //   			UsableContour[i] = true;
-//			}
+			//UsableContour[i] = true;
+			//if (similarity[i] > fabs(1.0- STRIP_WIDTH/STRIP_HEIGHT)) {
+			if (similarity[i] < 1.) {
+				UsableContour[i] = true;
+			}
+			else {
+				UsableContour[i] = false;
+			}
 		}
         
 		//if (similarity[i] < 10.) {
@@ -1408,14 +1424,18 @@ static bool ContourLocatorFarMode(vector < vector<Point> > &contours, int &close
 		int	usable=-1;
 
 		if (UsableContour[i])
+		{
 			usable = 1;
+		}
 		else
+		{
 			usable = 0;
+		}
 
 		testRect 	= boundingRect(contours.at(i));
 		//if (UsableContour[i] == true) 
 		{
-			printf("BS similarity[i=%2d]=%6.3f Usable=%d x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
+			printf("BSF similarity[i=%2d]=%6.3f Usable=%d x=%3d, w=%3d, y=%3d h=%3d a=%d\n", 
 				   i, similarity[i], usable, testRect.x, testRect.width, testRect.y, testRect.height, testRect.area());
 		}
 	}
@@ -1493,6 +1513,7 @@ static bool ContourLocatorFarMode(vector < vector<Point> > &contours, int &close
 
 			Rect testRect_j;
 			testRect_j 	= boundingRect(contours.at(j));
+			//AreaRatio	= testRect_i.area()/testRect_i.area();
 
 			// This test looks for the 2 rectangles that are the most similar in terms of size.
 			testMinDiff = abs(testRect_i.y - testRect_j.y) +
@@ -1536,7 +1557,7 @@ static bool ExtremeCloseupModeGet(vector < vector<Point> > &contours)
 		}
 	}
 
-	if (Count >= 2) {
+	if (Count >= 1) {
 		InExtremCloseupMode = true;
 	}
 
