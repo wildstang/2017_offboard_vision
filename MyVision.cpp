@@ -1119,12 +1119,12 @@ Exit:
 		// Send back any values to the RoboRIO
 		//
 		char output[256];
-		int	Parm2	= 2;
-		int	Parm3	= 3;
+		int	Parm2	= SetNum;
+		int	Parm3	= ImageNum;
 
-		sprintf(output, "%4.3f,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3);
+		sprintf(output, "%4.3f,%f,%d,%d\n", xCorrectionLevel, DistanceFromWall, SetNum, ImageNum);
 		//printf("%4.3f,%5.3f,%d,%d,%d\n", xCorrectionLevel, DistanceFromWall, Parm2, Parm3, weightingBound);
-		printf("xCorrectionLevel=%4.3f, DistanceFromWall=%5.3f\n", xCorrectionLevel, DistanceFromWall);
+		printf("xCorrectionLevel=%4.3f, DistanceFromWall=%5.3f SetNum=%03d ImageNum=%04d\n", xCorrectionLevel, DistanceFromWall, SetNum, ImageNum);
 		if ((ImageRecording == true)  && (fp_log != NULL)) {
 			fprintf(fp_log, "ImageNum=%04d xCorrectionLevel=%4.3f, DistanceFromWall=%5.3f\n", ImageNum, xCorrectionLevel, DistanceFromWall);
 		}
