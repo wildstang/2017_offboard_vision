@@ -211,6 +211,7 @@ static void ThresholdFarSet(void);
 
 static void ImageRecordBegin(void);
 static void ImageRecordEnd(void);
+static int FindFirstImageSet(void);
 
 // exports for the filter
 extern "C" {
@@ -230,6 +231,10 @@ extern "C" {
 extern bool filter_init(const char * args, void** filter_ctx) {
 	// This is the main initialization function that is called by the mjpg-streamer. 
 	// This function MUST exist even if it does nothing.
+
+	SetNum = FindFirstImageSet();
+	printf("First SetNum: %03d\n", SetNum);
+
 
 	// Create the semaphores for signalling that to the slave thread that there is work to be done and
 	// for the slave thread to signal when it has completed processing the image.
@@ -1717,3 +1722,32 @@ static void ImageRecordEnd(void)
 	}
 }
 
+static int FindFirstImageSet(void)
+{
+	// This function finds the first image set that we can use when recording.
+	// Really what its doing is looking for the file xxx-log.txt. Starting with
+	// xxx == 000, if the file exists (000-Log.txt), try the next one. If the file
+	// doesn't exist, we have a winner.
+	int		TestSetNum	= 0;
+	bool	FileFound 	= false;
+	char 	filename[256];
+	FILE 	*fp			= NULL;
+
+	while (FileFound == false) {
+		sprintf(filename, filename_log, TestSetNum);
+
+		fp = fopen(filename, "r");
+		if (fp != NULL) {
+			printf("File Already Found: %s\n", filename);
+			fclose (fp);
+			fp = NULL;
+			TestSetNum++;
+		}
+		else
+		{
+			FileFound = true;
+		}
+	}
+
+	return TestSetNum;
+}
