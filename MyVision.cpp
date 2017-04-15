@@ -39,6 +39,7 @@
 using namespace cv;
 using namespace std;
 
+
 // *******************************************
 // Defines & Constants
 // *******************************************
@@ -49,66 +50,6 @@ using namespace std;
 //#define MEASURE_TIME		// Uncomment if we want to measure the time for the various processing steps
 
 //#define READ_IMAGE_FILES						// Uncomment if we want to read recorded images and process them 
-
-//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-PracticeField-Brokem-CheckLastRun/%03d-Image-%04d.jpg";
-//static int SetNum_Read		= 2;
-//static int ImageNumMin_Read	= 1;
-//static int ImageNumMax_Read	= 20;
-//static int ImageNum_Read	= ImageNumMin_Read - 1;	
-
-//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-01/%03d-Image-%04d.jpg";
-//static int SetNum_Read		= 0;
-//static int ImageNumMin_Read	= 2;
-//static int ImageNumMax_Read	= 45;
-//static int ImageNum_Read	= ImageNumMin_Read - 1;	
-
-static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-02/%03d-Image-%04d.jpg";
-static int SetNum_Read		= 0;
-static int ImageNumMin_Read	= 1;
-static int ImageNumMax_Read	= 36;
-static int ImageNum_Read	= ImageNumMin_Read - 1;	
-
-//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-03/%03d-Image-%04d.jpg";
-//static int SetNum_Read		= 0;
-//static int ImageNumMin_Read	= 2;
-//static int ImageNumMax_Read	= 27;
-//static int ImageNum_Read	= ImageNumMin_Read - 1;	
-
-//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-04/%03d-Image-%04d.jpg";
-//static int SetNum_Read		= 0;
-//static int ImageNumMin_Read	= 2;
-//static int ImageNumMax_Read	= 27;
-//static int ImageNum_Read	= ImageNumMin_Read - 1;	
-
-//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-05/%03d-Image-%04d.jpg";
-//static int SetNum_Read		= 0;
-//static int ImageNumMin_Read	= 1;
-//static int ImageNumMax_Read	= 27;
-//static int ImageNum_Read	= ImageNumMin_Read - 1;	
-
-//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-06/%03d-Image-%04d.jpg";
-//static int SetNum_Read		= 0;
-//static int ImageNumMin_Read	= 1;
-//static int ImageNumMax_Read	= 31;
-//static int ImageNum_Read	= ImageNumMin_Read - 1;	
-
-//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-07/%03d-Image-%04d.jpg";
-//static int SetNum_Read		= 1;
-//static int ImageNumMin_Read	= 1;
-//static int ImageNumMax_Read	= 31;
-//static int ImageNum_Read	= ImageNumMin_Read - 1;	
-
-//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-08/%03d-Image-%04d.jpg";
-//static int SetNum_Read		= 1;
-//static int ImageNumMin_Read	= 1;
-//static int ImageNumMax_Read	= 26;
-//static int ImageNum_Read	= ImageNumMin_Read - 1;	
-
-//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-09/%03d-Image-%04d.jpg";
-//static int SetNum_Read		= 0;
-//static int ImageNumMin_Read	= 1;
-//static int ImageNumMax_Read	= 32;
-//static int ImageNum_Read	= ImageNumMin_Read - 1;	
 
 //#define USE_BLUR								// Uncomment if we want to use the OpenCV Blur (which is slow
 
@@ -142,10 +83,42 @@ static int ImageNum_Read	= ImageNumMin_Read - 1;
 // *******************************************
 // Local Structures
 // *******************************************
+typedef struct {
+	char	Directory[256];
+	int 	SetNum;
+	int 	ImageNumMin;
+	int 	ImageNumMax;
+} FILE_SET_ENTRY;
 
 // *******************************************
 // Local Variables
 // *******************************************
+static char HomeDir[] 			= "/home/pi/vision/test/";
+static char ImageNameFormat[]	= "%03d-Image-%04d.jpg";
+
+static FILE_SET_ENTRY FileSetList[] = {
+	// Directory,				SetNum,	ImageNumMin,	ImageNumMax,	
+	{ "",						0,		0,				0,				},	// 0
+	{ "ImageRec-UIC-Match-01",	0,		2,				45,				},	// 1
+	{ "ImageRec-UIC-Match-02",	0,		1,				36,				},	// 2
+	{ "ImageRec-UIC-Match-03",	0,		2,				27,				},	// 3
+	{ "ImageRec-UIC-Match-04",	0,		2,				27,				},	// 4
+	{ "ImageRec-UIC-Match-05",	0,		1,				27,				},	// 5
+	{ "ImageRec-UIC-Match-06",	0,		1,				31,				},	// 6
+	{ "ImageRec-UIC-Match-07",	1,		1,				31,				},	// 7
+	{ "ImageRec-UIC-Match-08",	1,		1,				26,				},	// 8
+	{ "ImageRec-UIC-Match-09",	0,		1,				32,				},	// 9
+};
+
+#define PLAYBACK_MATCH	2	// Selected from FileSetList[] above
+
+static char *FileSetName	= FileSetList[PLAYBACK_MATCH].Directory;
+static int SetNum_Read		= FileSetList[PLAYBACK_MATCH].SetNum;
+static int ImageNumMin_Read	= FileSetList[PLAYBACK_MATCH].ImageNumMin;
+static int ImageNumMax_Read	= FileSetList[PLAYBACK_MATCH].ImageNumMax;
+static int ImageNum_Read	= FileSetList[PLAYBACK_MATCH].ImageNumMin - 1;	
+
+
 static timespec tsPrev;					// Previous Time
 static pthread_t tid_KeyboardControl;	// Thread Id for KeyboardControlThread()
 static pthread_t tid_SocketRead;		// Thread Id for SocketReadThread()
@@ -797,16 +770,22 @@ static void ws_process(Mat& img) {
 
 #ifdef READ_IMAGE_FILES
 	{
-		char		buf[256];
+		char		FilenameFormat[256];
+		char		cFilename[256];
         Mat image;
 
 		printf("Waiting for 'f' or 'r' <enter>\n");
 		sem_wait(&sem_ReadImageFile);
 
-		sprintf(buf, filename_imageRead, SetNum_Read, ImageNum_Read);
-		printf("Reading file: %s\n", buf);
+		sprintf(FilenameFormat, "%s/%s/%s", HomeDir, FileSetName, ImageNameFormat);
 
-		string filename = buf;
+		sprintf(cFilename, FilenameFormat, SetNum_Read, ImageNum_Read);
+		//printf("FilenameFormat=%s\n", FilenameFormat);
+		//printf("Filename      =%s\n", cFilename);
+
+		printf("Reading file: %s\n", cFilename);
+
+		string filename = cFilename;
 		image = imread( filename, IMREAD_COLOR );
 		if(image.empty())
 		{
@@ -961,6 +940,26 @@ Continue:
 		line(img, Point(0, img.rows), Point(img.cols, 0), Scalar(0,0,255), 2);
 		goto Exit;
 	}
+
+#ifdef READ_IMAGE_FILES
+	{
+		char	TmpBuf[256];
+
+		sprintf(TmpBuf, "Set: %03d Image: %03d", SetNum_Read, ImageNum_Read);
+        
+		string	TmpStr = TmpBuf;
+
+		// put the image number on the image displayed
+		cv::putText(img, 
+					TmpStr,
+					Point(5, IMAGE_HEIGHT_P-20),
+					cv::FONT_HERSHEY_SIMPLEX, 		// Font
+					1.0, 							// Scale. 2.0 = 2x bigger
+					Scalar(0,255,255), 				// Color
+					1, 								// Thickness
+					CV_AA); 						// Anti-alias
+	}
+#endif //READ_IMAGE_FILES
 
 	if(!shouldContinue){
 		//ThresholdFarSet();
