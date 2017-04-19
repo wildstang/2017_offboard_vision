@@ -31,6 +31,9 @@
 #include <netdb.h>
 #include <semaphore.h>
 
+#include <netinet/tcp.h>
+
+
 #include <sys/time.h>
 
 // *******************************************
@@ -339,6 +342,7 @@ static void* SocketConnectionThread(void *arg)
 	timespec 	tsStart;
 	timespec 	tsEnd;
 	double 		Frame2FrameTimeInSec = 0.0;
+	int			value = 1; // To disable Nagle TCP algorithm so sending latency becomes reduced!
 
 	// This is the slave thread which is responsible for the following:
 	// 
@@ -402,8 +406,13 @@ static void* SocketConnectionThread(void *arg)
 			}
 			Count++;
 		}
+		if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char *)&value, sizeof(int)) < 0) {
+			printf("TCP_NODELAY failed\n");
+			return NULL;
+		}
+		
 		cout << endl;
-		cout << "Connected" << endl;
+		cout << "Connected (with lower latency...)" << endl;
 	
 		bzero(buffer,256);
 	
