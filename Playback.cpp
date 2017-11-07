@@ -101,8 +101,14 @@ using namespace std;
 //static int ImageNumMax_Read	= 26;
 //static int ImageNum_Read	= ImageNumMin_Read - 1;	
 
-static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-09/%03d-Image-%04d.jpg";
-static int SetNum_Read		= 0;
+//static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-UIC-Match-09/%03d-Image-%04d.jpg";
+//static int SetNum_Read		= 0;
+//static int ImageNumMin_Read	= 1;
+//static int ImageNumMax_Read	= 32;
+//static int ImageNum_Read	= ImageNumMin_Read - 1;	
+
+static char filename_imageRead[]= "/home/pi/vision/test/ImageRec-2017-04-11_broken/%03d-Image-%04d.jpg";
+static int SetNum_Read		= 4;
 static int ImageNumMin_Read	= 1;
 static int ImageNumMax_Read	= 32;
 static int ImageNum_Read	= ImageNumMin_Read - 1;	

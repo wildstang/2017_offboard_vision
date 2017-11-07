@@ -115,9 +115,15 @@ static FILE_SET_ENTRY FileSetList[] = {
 	{ "ImageRec-2017-04-11_broken",					1,  	1,				29,				},	// 11
 	{ "ImageRec-2017-04-11_broken",					2,  	1,				37,				},	// 12
 	{ "ImageRec-2017-04-11_broken",					4,  	1,				25,				},	// 13
+																								// 
+	{ "Champs-Calibration",							1,  	1,				185,			},	// 14
+	{ "Champs-Calibration",							2,  	0,				163,			},	// 15
+	{ "Champs-Calibration",							3,  	1,				135,			},	// 16
+	{ "Champs-Calibration",							4,  	1,				114,			},	// 17
+	{ "Champs-Calibration",							5,  	1,				205,			},	// 18
 };
 
-#define PLAYBACK_MATCH	13	// Selected from FileSetList[] above
+#define PLAYBACK_MATCH	14	// Selected from FileSetList[] above
 
 static char *FileSetName	= FileSetList[PLAYBACK_MATCH].Directory;
 static int SetNum_Read		= FileSetList[PLAYBACK_MATCH].SetNum;
@@ -342,7 +348,7 @@ static void* SocketConnectionThread(void *arg)
 	timespec 	tsStart;
 	timespec 	tsEnd;
 	double 		Frame2FrameTimeInSec = 0.0;
-	int			value = 1; // To disable Nagle TCP algorithm so sending latency becomes reduced!
+	//int			value = 1; // To disable Nagle TCP algorithm so sending latency becomes reduced!
 
 	// This is the slave thread which is responsible for the following:
 	// 
@@ -406,10 +412,10 @@ static void* SocketConnectionThread(void *arg)
 			}
 			Count++;
 		}
-		if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char *)&value, sizeof(int)) < 0) {
-			printf("TCP_NODELAY failed\n");
-			return NULL;
-		}
+		//if (setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, (char *)&value, sizeof(int)) < 0) {
+		//	printf("TCP_NODELAY failed\n");
+		//	return NULL;
+		//}
 		
 		cout << endl;
 		cout << "Connected (with lower latency...)" << endl;
@@ -1141,7 +1147,7 @@ Exit:
 		//printf("%d,%d,%d,%d\n", xCorrectionLevel, Parm1, Parm2, Parm3);
 #ifdef WS_USE_SOCKETS
 		int	ret;
-		//printf("%s", output);
+		printf("%s", output);
 		ret = send(sockfd, output, strlen(output)+1, 0);
 		if (ret < 0) {
 			SocketConnected = false;
